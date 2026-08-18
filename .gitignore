@@ -24,3 +24,32 @@ _ReSharper*/
 # OS files
 .DS_Store
 Thumbs.db
+# Secrets / local configuration
+.env
+.env.*
+!.env.example
+
+# Local configuration
+appsettings.Local.json
+appsettings.Development.json
+
+# Credentials
+secrets.json
+credentials.json
+
+# Logs
+*.log
+logs/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Build
+[Bb]in/
+[Oo]bj/
+
+# NuGet
+*.nupkg
+*.snupkg
