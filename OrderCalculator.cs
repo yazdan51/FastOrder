@@ -65,11 +65,32 @@ namespace FastOrder
             long quantity,
             long commissionAmount)
         {
+            if (price <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(price),
+                    "Price must be greater than zero.");
+            }
+
+            if (quantity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(quantity),
+                    "Quantity must be greater than zero.");
+            }
+
+            if (commissionAmount < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(commissionAmount),
+                    "Commission amount cannot be negative.");
+            }
+
             long grossValue =
-                price * quantity;
+                checked(price * quantity);
 
             long totalValue =
-                grossValue + commissionAmount;
+                checked(grossValue + commissionAmount);
 
             double commissionRate =
                 grossValue == 0
