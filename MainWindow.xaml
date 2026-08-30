@@ -1,4 +1,4 @@
-﻿ <Window x:Class="FastOrder.MainWindow"
+﻿<Window x:Class="FastOrder.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -17,13 +17,17 @@
             <RowDefinition Height="330"/>
         </Grid.RowDefinitions>
 
-        <!-- ================================================= -->
-        <!-- TOP BAR -->
-        <!-- ================================================= -->
 
-        <StackPanel Grid.Row="0"
-                    Orientation="Horizontal"
-                    Margin="0,0,0,10">
+        <!-- TOP BAR -->
+
+        <Grid Grid.Row="0"
+              Margin="0,0,0,10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <WrapPanel Grid.Row="0">
 
             <Button x:Name="LoginButton"
                     Content="ورود به EasyTrader"
@@ -38,6 +42,52 @@
                     Height="36"
                     Margin="0,0,10,0"
                     Click="MonitoringButton_Click"/>
+
+            <Button x:Name="LoginStatusButton"
+                    Content="وضعیت ورود"
+                    Width="120"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    Click="LoginStatusButton_Click"/>
+
+            <Button x:Name="PreviewOrderButton"
+                    Content="بررسی و تأیید سفارش"
+                    Width="175"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    Click="PreviewOrderButton_Click"/>
+
+            <Button x:Name="PrepareOrderButton"
+                    Content="آماده‌سازی محلی"
+                    Width="155"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    IsEnabled="False"
+                    ToolTip="Payload و ترافیک طبیعی سایت را کنترل می‌کند؛ هیچ سفارشی ارسال نمی‌شود."
+                    Click="PrepareOrderButton_Click"/>
+
+            <Button x:Name="SendLiveOrderButton"
+                    Content="زمان‌بندی ارسال واقعی"
+                    Width="185"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    IsEnabled="False"
+                    Background="#FFC62828"
+                    Foreground="White"
+                    FontWeight="SemiBold"
+                    ToolTip="پس از تأیید نهایی، در بازه تعیین‌شده تا اولین پاسخ موفق تلاش می‌کند."
+                    Click="SendLiveOrderButton_Click"/>
+
+            <Button x:Name="CancelScheduledOrderButton"
+                    Content="لغو زمان‌بندی"
+                    Width="135"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    IsEnabled="False"
+                    Background="#FF616161"
+                    Foreground="White"
+                    ToolTip="تلاش‌های بعدی را لغو می‌کند؛ عملیات ارسال‌شده قابل بازگردانی نیست."
+                    Click="CancelScheduledOrderButton_Click"/>
 
             <Button x:Name="PauseButton"
                     Content="Pause Log"
@@ -60,26 +110,27 @@
                     Margin="0,0,10,0"
                     Click="ReloadButton_Click"/>
 
+            </WrapPanel>
+
             <TextBlock x:Name="StatusTextBlock"
+                       Grid.Row="1"
                        Text="در حال آماده‌سازی..."
                        VerticalAlignment="Center"
-                       Margin="15,0,0,0"
+                       Margin="0,8,0,0"
                        FontSize="15"/>
 
-        </StackPanel>
+        </Grid>
 
-        <!-- ================================================= -->
+
         <!-- WEBVIEW -->
-        <!-- ================================================= -->
 
         <wv2:WebView2 x:Name="Browser"
                       Grid.Row="1"
                       NavigationStarting="Browser_NavigationStarting"
                       NavigationCompleted="Browser_NavigationCompleted"/>
 
-        <!-- ================================================= -->
+
         <!-- LOG AREA -->
-        <!-- ================================================= -->
 
         <Grid Grid.Row="2"
               Margin="0,10,0,0">
@@ -89,9 +140,8 @@
                 <ColumnDefinition Width="1.3*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- ================================================= -->
+
             <!-- LIVE LOG -->
-            <!-- ================================================= -->
 
             <GroupBox Grid.Column="0"
                       Header="Live Network Log"
@@ -109,9 +159,8 @@
 
             </GroupBox>
 
-            <!-- ================================================= -->
+
             <!-- IMPORTANT API -->
-            <!-- ================================================= -->
 
             <GroupBox Grid.Column="1"
                       Header="Important API"
@@ -141,7 +190,6 @@
                             Height="30"
                             Margin="5"
                             Click="ClearImportantButton_Click"/>
-
                 </Grid>
 
             </GroupBox>
@@ -151,4 +199,3 @@
     </Grid>
 
 </Window>
-
