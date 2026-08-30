@@ -1,0 +1,135 @@
+<Window x:Class="FastOrder.OrderConfirmationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="بررسی نهایی سفارش"
+        Width="640"
+        Height="720"
+        MinWidth="560"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        FlowDirection="RightToLeft">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="بررسی نهایی اطلاعات سفارش"
+                   FontSize="22"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,14"/>
+
+        <Border Grid.Row="1"
+                Background="#FFFFF4CE"
+                BorderBrush="#FFE0B000"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="12"
+                Margin="0,0,0,16">
+            <TextBlock Text="این پنجره فقط برای بررسی و تأیید محلی است. هیچ سفارش یا درخواست شبکه‌ای ارسال نمی‌شود."
+                       TextWrapping="Wrap"
+                       FontWeight="SemiBold"/>
+        </Border>
+
+        <Grid Grid.Row="2"
+              Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="190"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="نماد:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="SymbolTextBlock" Grid.Row="0" Grid.Column="1" Margin="0,3"/>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="ISIN:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="IsinTextBlock" Grid.Row="1" Grid.Column="1" Margin="0,3" FlowDirection="LeftToRight" TextAlignment="Right"/>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="کد سمت سفارش:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="SideTextBlock" Grid.Row="2" Grid.Column="1" Margin="0,3"/>
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="قیمت:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="PriceTextBlock" Grid.Row="3" Grid.Column="1" Margin="0,3"/>
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="تعداد:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="QuantityTextBlock" Grid.Row="4" Grid.Column="1" Margin="0,3"/>
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="ارزش ناخالص:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="GrossValueTextBlock" Grid.Row="5" Grid.Column="1" Margin="0,3"/>
+
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="کارمزد:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="CommissionTextBlock" Grid.Row="6" Grid.Column="1" Margin="0,3"/>
+
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="ارزش نهایی:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="TotalValueTextBlock" Grid.Row="7" Grid.Column="1" Margin="0,3" FontWeight="SemiBold"/>
+
+            <TextBlock Grid.Row="8" Grid.Column="0" Text="مدل / مبدأ / اعتبار:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="OrderMetadataTextBlock" Grid.Row="8" Grid.Column="1" Margin="0,3"/>
+
+            <TextBlock Grid.Row="9" Grid.Column="0" Text="زمان ساخت Payload:" FontWeight="SemiBold" Margin="0,3"/>
+            <TextBlock x:Name="CreatedAtTextBlock" Grid.Row="9" Grid.Column="1" Margin="0,3" FlowDirection="LeftToRight" TextAlignment="Right"/>
+        </Grid>
+
+        <Expander Grid.Row="3"
+                  Header="مشاهده JSON ساخته‌شده"
+                  IsExpanded="False"
+                  Margin="0,0,0,16">
+            <TextBox x:Name="PayloadTextBox"
+                     IsReadOnly="True"
+                     AcceptsReturn="True"
+                     TextWrapping="NoWrap"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto"
+                     FontFamily="Consolas"
+                     FontSize="12"
+                     Padding="8"
+                     FlowDirection="LeftToRight"
+                     AutomationProperties.Name="JSON سفارش"/>
+        </Expander>
+
+        <CheckBox x:Name="ConfirmationCheckBox"
+                  Grid.Row="4"
+                  Content="اطلاعات بالا را بررسی کردم. این تأیید باعث ارسال سفارش نمی‌شود."
+                  Margin="0,0,0,16"
+                  Checked="ConfirmationCheckBox_Changed"
+                  Unchecked="ConfirmationCheckBox_Changed"
+                  AutomationProperties.Name="تأیید بررسی اطلاعات سفارش"/>
+
+        <StackPanel Grid.Row="5"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Left"
+                    FlowDirection="LeftToRight">
+            <Button Content="انصراف"
+                    Width="100"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    IsCancel="True"/>
+
+            <Button x:Name="ConfirmButton"
+                    Content="تأیید محلی"
+                    Width="130"
+                    Height="36"
+                    IsEnabled="False"
+                    IsDefault="True"
+                    Click="ConfirmButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
