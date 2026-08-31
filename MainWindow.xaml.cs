@@ -1569,8 +1569,49 @@ namespace FastOrder
                     "NON-BLOCKING CLOCK ERROR: " +
                     ex.Message);
 
+                // مانند cancellation، خطای داخلی فقط باید ایجاد slot جدید را
+                // متوقف کند. dispatchهایی که قبلاً شروع شده‌اند ممکن است کلیک
+                // رسمی را انجام داده باشند؛ بنابراین قبل از cleanup باید
+                // نتیجه همه آنها برای حسابداری sent/in-flight تعیین تکلیف شود.
+                if (activeDispatchTasks.Count > 0)
+                {
+                    WriteImportant(
+                        "INTERNAL ERROR; WAITING FOR ALREADY-LAUNCHED UI DISPATCH TASKS.");
+
+                    try
+                    {
+                        await Task.WhenAll(
+                            activeDispatchTasks);
+                    }
+                    catch (Exception settleException)
+                    {
+                        WriteImportant(
+                            "ACTIVE DISPATCH SETTLE ERROR AFTER INTERNAL ERROR: " +
+                            settleException.Message);
+                    }
+                }
+
+                long errorSent;
+                long errorInFlight;
+
+                lock (accountingLock)
+                {
+                    errorSent =
+                        sentQuantity;
+
+                    errorInFlight =
+                        inFlightQuantity;
+                }
+
+                WriteImportant(
+                    "INTERNAL ERROR FINAL SENT QUANTITY: " +
+                    errorSent);
+                WriteImportant(
+                    "INTERNAL ERROR FINAL IN-FLIGHT QUANTITY: " +
+                    errorInFlight);
+
                 WriteScheduledOrderStopped(
-                    "خطای داخلی رخ داد و slotهای جدید متوقف شدند.",
+                    "خطای داخلی رخ داد؛ slot جدید متوقف شد و dispatchهای قبلاً شروع‌شده تعیین تکلیف شدند.",
                     "STOPPED ON INTERNAL ERROR");
             }
             finally
