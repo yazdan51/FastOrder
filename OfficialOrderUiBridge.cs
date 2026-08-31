@@ -21,6 +21,12 @@ namespace FastOrder
             init;
         } = "";
 
+        [JsonPropertyName("clickX")]
+        public double ClickX { get; init; }
+
+        [JsonPropertyName("clickY")]
+        public double ClickY { get; init; }
+
         public bool HasStatus(
             string expectedStatus)
         {
@@ -103,7 +109,7 @@ namespace FastOrder
 
             return $$"""
                 (() => {
-                    const result = (status, reason) => ({ status, reason });
+                    const result = (status, reason, clickX=0, clickY=0) => ({ status, reason, clickX, clickY });
                     const expectedOrigin = {{expectedOrigin}};
                     const metaKey = "__fastOrderCurrentInstrumentV1";
                     const norm = v => String(v ?? "")
@@ -113,7 +119,22 @@ namespace FastOrder
                         const s = getComputedStyle(e);
                         return s.display !== "none" &&
                             s.visibility !== "hidden" &&
+                            s.opacity !== "0" &&
                             e.getClientRects().length > 0;
+                    };
+
+                    const onScreen = e => {
+                        if (!(e instanceof HTMLElement) || !visible(e))
+                            return false;
+
+                        const r = e.getBoundingClientRect();
+
+                        return r.width > 0 &&
+                            r.height > 0 &&
+                            r.right > 0 &&
+                            r.bottom > 0 &&
+                            r.left < window.innerWidth &&
+                            r.top < window.innerHeight;
                     };
                     const isinFrom = root => {
                         if (!(root instanceof Element)) return "";
@@ -163,15 +184,47 @@ namespace FastOrder
                         return result("INVALID_ORIGIN","EasyTrader origin was not active.");
 
                     const openDialog = Array.from(
-                        document.querySelectorAll('[role="dialog"],dialog'))
-                        .filter(visible)
-                        .find(d => d.querySelector("#quantity") && d.querySelector("#price"));
+                        document.querySelectorAll(
+                            '[role="dialog"],dialog,[data-cy="popup-order-form"]'))
+                        .filter(onScreen)
+                        .find(d => {
+                            const q = d.querySelector("#quantity");
+                            const p = d.querySelector("#price");
+                            const send = Array.from(d.querySelectorAll("button"))
+                                .find(b => onScreen(b) &&
+                                    ["ارسال خرید","ارسال فروش"].includes(
+                                        norm(b.textContent)));
 
-                    if (openDialog)
-                        return result("DIALOG_ALREADY_OPEN","An official order dialog is already open.");
+                            return q instanceof HTMLInputElement &&
+                                p instanceof HTMLInputElement &&
+                                onScreen(q) &&
+                                onScreen(p) &&
+                                send instanceof HTMLButtonElement;
+                        });
+
+                    if (openDialog) {
+                        const r = openDialog.getBoundingClientRect();
+
+                        return result(
+                            "DIALOG_ALREADY_OPEN",
+                            "Usable official order dialog is already open. " +
+                            `rect=${Math.round(r.x)},${Math.round(r.y)},` +
+                            `${Math.round(r.width)},${Math.round(r.height)}`);
+                    }
 
                     const buys = Array.from(document.querySelectorAll("button"))
-                        .filter(b => visible(b) && norm(b.textContent) === "خرید");
+                        .filter(b => onScreen(b) && norm(b.textContent) === "خرید")
+                        .sort((a, b) => {
+                            const ar = a.getBoundingClientRect();
+                            const br = b.getBoundingClientRect();
+
+                            const ac = Math.abs((ar.left + ar.right) / 2 - window.innerWidth / 2) +
+                                Math.abs((ar.top + ar.bottom) / 2 - window.innerHeight / 2);
+                            const bc = Math.abs((br.left + br.right) / 2 - window.innerWidth / 2) +
+                                Math.abs((br.top + br.bottom) / 2 - window.innerHeight / 2);
+
+                            return ac - bc;
+                        });
 
                     for (const buy of buys) {
                         let a = buy;
@@ -195,8 +248,19 @@ namespace FastOrder
                                 symbolName, symbolIsin, capturedAt: Date.now()
                             });
 
+                            const r = buy.getBoundingClientRect();
+
+                            buy.focus();
                             buy.click();
-                            return result("DIALOG_OPEN_REQUESTED","Current buy dialog requested.");
+
+                            return result(
+                                "DIALOG_OPEN_REQUESTED",
+                                "Current buy dialog requested from on-screen BUY button. " +
+                                `rect=${Math.round(r.x)},${Math.round(r.y)},` +
+                                `${Math.round(r.width)},${Math.round(r.height)} ` +
+                                `symbol=${symbolName} isin=${symbolIsin}`,
+                                r.left + r.width / 2,
+                                r.top + r.height / 2);
                         }
                     }
 
@@ -383,28 +447,117 @@ namespace FastOrder
                         return result("INVALID_ORIGIN","EasyTrader origin was not active.");
 
                     let box = Array.from(
-                        document.querySelectorAll('[role="dialog"],dialog'))
+                        document.querySelectorAll(
+                            '[data-cy="popup-order-form"],[role="dialog"],dialog'))
                         .filter(visible)
-                        .find(d=>d.querySelector("#quantity") && d.querySelector("#price"));
+                        .find(d =>
+                            d.querySelector("#quantity") &&
+                            d.querySelector("#price"));
 
                     if (!box) {
-                        for (const q of Array.from(document.querySelectorAll("#quantity")).filter(visible)) {
-                            let a=q.parentElement;
-                            for (let depth=0; depth<12 && a instanceof HTMLElement;
-                                 depth++, a=a.parentElement) {
-                                if (a===document.body || a===document.documentElement) break;
-                                const p=a.querySelector("#price");
-                                const send=Array.from(a.querySelectorAll("button"))
-                                    .find(b=>visible(b) &&
-                                        ["ارسال خرید","ارسال فروش"].includes(norm(b.textContent)));
-                                if (p && send) { box=a; break; }
+                        const quantities =
+                            Array.from(document.querySelectorAll("#quantity"))
+                                .filter(visible);
+
+                        const submitSelector =
+                            '[data-cy="oms-order-form-submit-button-buy"],' +
+                            '[data-cy="oms-order-form-submit-button-sell"]';
+
+                        for (const q of quantities) {
+                            let a = q.parentElement;
+
+                            for (let depth = 0;
+                                depth < 24 && a instanceof HTMLElement;
+                                depth++, a = a.parentElement) {
+
+                                const p = a.querySelector("#price");
+                                const submit = a.querySelector(submitSelector);
+
+                                if (p instanceof HTMLInputElement &&
+                                    submit instanceof HTMLButtonElement &&
+                                    visible(p) &&
+                                    visible(submit)) {
+
+                                    box = a;
+                                    break;
+                                }
+
+                                if (a === document.body ||
+                                    a === document.documentElement)
+                                    break;
                             }
-                            if (box) break;
+
+                            if (box)
+                                break;
                         }
                     }
 
-                    if (!(box instanceof HTMLElement))
-                        return result("ORDER_FORM_NOT_FOUND","Official order form not found.");
+                    if (!(box instanceof HTMLElement)) {
+                        const describe = e => {
+                            if (!(e instanceof HTMLElement)) return "none";
+
+                            const r = e.getBoundingClientRect();
+                            const s = getComputedStyle(e);
+
+                            return [
+                                e.tagName,
+                                e.id ? `#${e.id}` : "",
+                                e.getAttribute("data-cy")
+                                    ? `[data-cy=${e.getAttribute("data-cy")}]`
+                                    : "",
+                                `display=${s.display}`,
+                                `visibility=${s.visibility}`,
+                                `opacity=${s.opacity}`,
+                                `rect=${Math.round(r.x)},${Math.round(r.y)},` +
+                                    `${Math.round(r.width)},${Math.round(r.height)}`
+                            ].filter(Boolean).join(" ");
+                        };
+
+                        const quantities =
+                            Array.from(document.querySelectorAll("#quantity"));
+
+                        const prices =
+                            Array.from(document.querySelectorAll("#price"));
+
+                        const popups =
+                            Array.from(document.querySelectorAll(
+                                '[data-cy="popup-order-form"]'));
+
+                        const dialogs =
+                            Array.from(document.querySelectorAll(
+                                '[role="dialog"],dialog'));
+
+                        const nearbyInputs =
+                            Array.from(document.querySelectorAll("input"))
+                                .filter(e => {
+                                    const id = String(e.id || "").toLowerCase();
+                                    const name = String(e.getAttribute("name") || "")
+                                        .toLowerCase();
+                                    const ph = String(e.getAttribute("placeholder") || "")
+                                        .toLowerCase();
+
+                                    return /quantity|price|تعداد|قیمت/.test(
+                                        id + " " + name + " " + ph);
+                                })
+                                .slice(0, 12)
+                                .map(describe);
+
+                        const diagnostic = [
+                            `quantityCount=${quantities.length}`,
+                            `priceCount=${prices.length}`,
+                            `popupCount=${popups.length}`,
+                            `dialogCount=${dialogs.length}`,
+                            `quantity0=${describe(quantities[0])}`,
+                            `price0=${describe(prices[0])}`,
+                            `popup0=${describe(popups[0])}`,
+                            `dialog0=${describe(dialogs[0])}`,
+                            `candidateInputs=${nearbyInputs.join(" || ")}`
+                        ].join(" | ");
+
+                        return result(
+                            "ORDER_FORM_NOT_FOUND",
+                            diagnostic);
+                    }
 
                     const q=box.querySelector("#quantity");
                     const p=box.querySelector("#price");
@@ -418,11 +571,83 @@ namespace FastOrder
                     if (!price || Number(price)<=0)
                         return result("PRICE_NOT_READY","Price invalid.");
 
-                    const send=Array.from(box.querySelectorAll("button"))
-                        .find(b=>visible(b) &&
-                            ["ارسال خرید","ارسال فروش"].includes(norm(b.textContent)));
-                    if (!(send instanceof HTMLButtonElement))
-                        return result("SEND_ACTION_NOT_FOUND","Send action not found.");
+                    const send =
+                        box.querySelector(
+                            '[data-cy="oms-order-form-submit-button-buy"],' +
+                            '[data-cy="oms-order-form-submit-button-sell"]') ||
+                        Array.from(box.querySelectorAll("button"))
+                            .find(b=>visible(b) &&
+                                /ارسال\s*(خرید|فروش)/.test(
+                                    norm(b.textContent)));
+                    if (!(send instanceof HTMLButtonElement)) {
+                        const describe = e => {
+                            if (!(e instanceof HTMLElement)) return "none";
+
+                            const r = e.getBoundingClientRect();
+                            const s = getComputedStyle(e);
+                            const text = norm(e.textContent);
+                            const cy = e.getAttribute("data-cy") || "";
+                            const cls = String(e.className || "");
+
+                            return [
+                                e.tagName,
+                                e.id ? `#${e.id}` : "",
+                                cy ? `[data-cy=${cy}]` : "",
+                                cls ? `class=${cls}` : "",
+                                `text=${text.slice(0,120)}`,
+                                `display=${s.display}`,
+                                `visibility=${s.visibility}`,
+                                `opacity=${s.opacity}`,
+                                `rect=${Math.round(r.x)},${Math.round(r.y)},` +
+                                    `${Math.round(r.width)},${Math.round(r.height)}`
+                            ].filter(Boolean).join(" ");
+                        };
+
+                        const visibleButtons =
+                            Array.from(document.querySelectorAll("button"))
+                                .filter(visible)
+                                .map(describe)
+                                .slice(0, 30);
+
+                        const q0 = document.querySelector("#quantity");
+                        const ancestorChain = [];
+
+                        if (q0 instanceof HTMLElement) {
+                            let a = q0;
+
+                            for (let depth = 0;
+                                depth < 12 && a instanceof HTMLElement;
+                                depth++, a = a.parentElement) {
+
+                                ancestorChain.push(
+                                    `D${depth}:${describe(a)}`);
+
+                                if (a === document.body ||
+                                    a === document.documentElement)
+                                    break;
+                            }
+                        }
+
+                        const actionCandidates =
+                            Array.from(document.querySelectorAll(
+                                '[data-cy*="submit"],[data-cy*="send"],' +
+                                '[class*="submit"],[class*="send"]'))
+                                .filter(e => e instanceof HTMLElement)
+                                .filter(visible)
+                                .map(describe)
+                                .slice(0, 20);
+
+                        const diagnostic = [
+                            `box=${describe(box)}`,
+                            `buttons=${visibleButtons.join(" || ")}`,
+                            `ancestors=${ancestorChain.join(" || ")}`,
+                            `actionCandidates=${actionCandidates.join(" || ")}`
+                        ].join(" | ");
+
+                        return result(
+                            "SEND_ACTION_NOT_FOUND",
+                            diagnostic);
+                    }
 
                     const side=norm(send.textContent)==="ارسال فروش" ? 1 : 0;
                     const meta=window[metaKey] || {};

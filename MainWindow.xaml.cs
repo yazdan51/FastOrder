@@ -118,12 +118,65 @@ namespace FastOrder
                 OfficialOrderUiBridgeResult result =
                     OfficialOrderUiBridge.ParseResult(json);
 
+                bool trustedClickFallbackUsed = false;
+
+                if (result.HasStatus(OfficialOrderUiBridge.DialogOpenRequestedStatus) &&
+                    result.ClickX > 0 &&
+                    result.ClickY > 0)
+                {
+                    trustedClickFallbackUsed = true;
+
+                    string moveJson = JsonSerializer.Serialize(new
+                    {
+                        type = "mouseMoved",
+                        x = result.ClickX,
+                        y = result.ClickY,
+                        button = "none",
+                        clickCount = 0
+                    });
+
+                    string downJson = JsonSerializer.Serialize(new
+                    {
+                        type = "mousePressed",
+                        x = result.ClickX,
+                        y = result.ClickY,
+                        button = "left",
+                        clickCount = 1
+                    });
+
+                    string upJson = JsonSerializer.Serialize(new
+                    {
+                        type = "mouseReleased",
+                        x = result.ClickX,
+                        y = result.ClickY,
+                        button = "left",
+                        clickCount = 1
+                    });
+
+                    await Browser.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent",
+                        moveJson);
+
+                    await Browser.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent",
+                        downJson);
+
+                    await Browser.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent",
+                        upJson);
+                }
+
                 WriteImportant("");
                 WriteImportant("========================================");
                 WriteImportant("OPEN CURRENT EASYTRADER ORDER FORM");
                 WriteImportant("========================================");
                 WriteImportant("STATUS: " + result.Status);
+                WriteImportant("REASON: " + result.Reason);
+                WriteImportant(
+                    "TRUSTED BUY CLICK FALLBACK: " +
+                    (trustedClickFallbackUsed ? "YES" : "NO"));
                 WriteImportant("HTTP POST: NOT SENT");
+                WriteImportant("FINAL SUBMIT CLICK: NO");
                 WriteImportant("========================================");
 
                 bool opened =
