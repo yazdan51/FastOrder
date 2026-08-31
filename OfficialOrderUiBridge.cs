@@ -31,8 +31,44 @@ namespace FastOrder
         }
     }
 
+    internal sealed class OfficialOrderFormReadResult
+    {
+        [JsonPropertyName("status")]
+        public string Status { get; init; } = "";
+
+        [JsonPropertyName("reason")]
+        public string Reason { get; init; } = "";
+
+        [JsonPropertyName("symbolName")]
+        public string SymbolName { get; init; } = "";
+
+        [JsonPropertyName("symbolIsin")]
+        public string SymbolIsin { get; init; } = "";
+
+        [JsonPropertyName("price")]
+        public string Price { get; init; } = "";
+
+        [JsonPropertyName("quantity")]
+        public string Quantity { get; init; } = "";
+
+        [JsonPropertyName("side")]
+        public int Side { get; init; }
+
+        [JsonPropertyName("commissionAmount")]
+        public string CommissionAmount { get; init; } = "";
+
+        [JsonPropertyName("totalValue")]
+        public string TotalValue { get; init; } = "";
+
+        public bool HasStatus(string expectedStatus) =>
+            string.Equals(Status, expectedStatus, StringComparison.Ordinal);
+    }
+
     internal static class OfficialOrderUiBridge
     {
+        public const string FormReadStatus =
+            "FORM_READ";
+
         public const string PreparedStatus =
             "PREPARED";
 
@@ -60,6 +96,435 @@ namespace FastOrder
                 PropertyNameCaseInsensitive =
                     true
             };
+
+        public static string BuildOpenCurrentSymbolBuyDialogScript()
+        {
+            string expectedOrigin = JsonSerializer.Serialize(ExpectedOrigin);
+
+            return $$"""
+                (() => {
+                    const result = (status, reason) => ({ status, reason });
+                    const expectedOrigin = {{expectedOrigin}};
+                    const metaKey = "__fastOrderCurrentInstrumentV1";
+                    const norm = v => String(v ?? "")
+                        .replace(/[\s\u200c\u200f\u202a-\u202e]+/g, " ").trim();
+                    const visible = e => {
+                        if (!(e instanceof HTMLElement)) return false;
+                        const s = getComputedStyle(e);
+                        return s.display !== "none" &&
+                            s.visibility !== "hidden" &&
+                            e.getClientRects().length > 0;
+                    };
+                    const isinFrom = root => {
+                        if (!(root instanceof Element)) return "";
+                        const all = [root, ...root.querySelectorAll("*")];
+                        for (const e of all) {
+                            for (const a of Array.from(e.attributes ?? [])) {
+                                const m = String(a.value ?? "").toUpperCase()
+                                    .match(/IR[A-Z0-9]{10}/);
+                                if (m) return m[0];
+                            }
+                        }
+                        return "";
+                    };
+                    const nameFrom = root => {
+                        const direct = [
+                            "[data-symbol-name]", "[symbol-name]",
+                            "#symbol-name", ".symbol-name"
+                        ];
+                        for (const sel of direct) {
+                            const e = root.querySelector(sel);
+                            if (e instanceof HTMLElement && visible(e)) {
+                                const v = norm(
+                                    e.getAttribute("data-symbol-name") ||
+                                    e.getAttribute("symbol-name") ||
+                                    e.textContent);
+                                if (v && v.length <= 40) return v;
+                            }
+                        }
+                        const candidates = Array.from(
+                            root.querySelectorAll("a,[role=\"link\"],[aria-label]"))
+                            .filter(visible)
+                            .map(e => norm(e.getAttribute("aria-label") || e.textContent))
+                            .filter(v => v && v.length <= 40 &&
+                                !/^[0-9,.\s]+$/.test(v) &&
+                                v !== "خرید" && v !== "فروش");
+                        const raw = candidates[0] || "";
+
+                        if (raw.includes("TAL")) {
+                            const beforeTal = norm(raw.split("TAL")[0]);
+                            if (beforeTal) return beforeTal;
+                        }
+
+                        return raw;
+                    };
+
+                    if (location.origin !== expectedOrigin)
+                        return result("INVALID_ORIGIN","EasyTrader origin was not active.");
+
+                    const openDialog = Array.from(
+                        document.querySelectorAll('[role="dialog"],dialog'))
+                        .filter(visible)
+                        .find(d => d.querySelector("#quantity") && d.querySelector("#price"));
+
+                    if (openDialog)
+                        return result("DIALOG_ALREADY_OPEN","An official order dialog is already open.");
+
+                    const buys = Array.from(document.querySelectorAll("button"))
+                        .filter(b => visible(b) && norm(b.textContent) === "خرید");
+
+                    for (const buy of buys) {
+                        let a = buy;
+                        for (let depth=0; depth<12 && a instanceof HTMLElement;
+                             depth++, a=a.parentElement) {
+                            if (a===document.body || a===document.documentElement) break;
+                            if (!a.querySelector("#symbol-header-last-div") ||
+                                !a.querySelector("#minPrice")) continue;
+
+                            const symbolIsin = isinFrom(a);
+                            const symbolName = nameFrom(a);
+
+                            if (!symbolIsin)
+                                return result("INSTRUMENT_NOT_VERIFIED","Current ISIN was not found.");
+                            if (!symbolName)
+                                return result("SYMBOL_NAME_NOT_FOUND","Current symbol name was not found.");
+                            if (buy.disabled || buy.getAttribute("aria-disabled")==="true")
+                                return result("BUY_ACTION_DISABLED","Buy action is disabled.");
+
+                            window[metaKey] = Object.freeze({
+                                symbolName, symbolIsin, capturedAt: Date.now()
+                            });
+
+                            buy.click();
+                            return result("DIALOG_OPEN_REQUESTED","Current buy dialog requested.");
+                        }
+                    }
+
+                    return result("CURRENT_INSTRUMENT_NOT_FOUND","Visible current instrument was not found.");
+                })()
+                """;
+        }
+
+        public static string BuildReadCurrentOrderFormScript()
+        {
+            string expectedOrigin = JsonSerializer.Serialize(ExpectedOrigin);
+
+            return $$"""
+                (() => {
+                    const result = (status, reason, symbolName="", symbolIsin="",
+                                    price="", quantity="", side=0,
+                                    commissionAmount="", totalValue="") =>
+                        ({status, reason, symbolName, symbolIsin, price, quantity, side,
+                          commissionAmount, totalValue});
+                    const expectedOrigin = {{expectedOrigin}};
+                    const metaKey = "__fastOrderCurrentInstrumentV1";
+                    const norm = v => String(v ?? "")
+                        .replace(/[\s\u200c\u200f\u202a-\u202e]+/g," ").trim();
+                    const num = v => String(v ?? "")
+                        .replace(/[۰-۹]/g,c=>String(c.charCodeAt(0)-"۰".charCodeAt(0)))
+                        .replace(/[٠-٩]/g,c=>String(c.charCodeAt(0)-"٠".charCodeAt(0)))
+                        .replace(/[^0-9]/g,"");
+                    const visible = e => {
+                        if (!(e instanceof HTMLElement)) return false;
+                        const s=getComputedStyle(e);
+                        return s.display!=="none" && s.visibility!=="hidden" &&
+                            e.getClientRects().length>0;
+                    };
+                    const labeledAmount = (root, labels, attrRegex) => {
+                        if (!(root instanceof Element)) return "";
+
+                        const elements = Array.from(root.querySelectorAll("*"))
+                            .filter(visible);
+
+                        const exactLabels = elements.filter(e => {
+                            const text = norm(e.textContent)
+                                .replace(/[:：]/g, "")
+                                .trim();
+
+                            return labels.includes(text);
+                        });
+
+                        const pickNumeric = scope => {
+                            if (!(scope instanceof Element)) return "";
+
+                            const numericElements = [scope, ...scope.querySelectorAll("*")]
+                                .filter(visible)
+                                .map(e => ({
+                                    element: e,
+                                    text: norm(e.textContent)
+                                }))
+                                .filter(x =>
+                                    x.text &&
+                                    !labels.includes(
+                                        x.text.replace(/[:：]/g, "").trim()) &&
+                                    /[0-9۰-۹٠-٩]/.test(x.text));
+
+                            for (const item of numericElements) {
+                                const v = num(item.text);
+                                if (v && Number(v) > 0) return v;
+                            }
+
+                            return "";
+                        };
+
+                        for (const label of exactLabels) {
+                            const siblingScopes = [
+                                label.nextElementSibling,
+                                label.previousElementSibling
+                            ].filter(Boolean);
+
+                            for (const scope of siblingScopes) {
+                                const v = pickNumeric(scope);
+                                if (v) return v;
+                            }
+
+                            let row = label.parentElement;
+
+                            for (let depth = 0;
+                                depth < 4 && row instanceof HTMLElement;
+                                depth++, row = row.parentElement) {
+
+                                const rowText = norm(row.textContent)
+                                    .replace(/[:：]/g, " ")
+                                    .trim();
+
+                                if (!labels.some(x => rowText.includes(x))) {
+                                    continue;
+                                }
+
+                                const candidates = Array.from(row.children)
+                                    .filter(visible)
+                                    .filter(child => child !== label);
+
+                                for (const candidate of candidates) {
+                                    const v = pickNumeric(candidate);
+                                    if (v) return v;
+                                }
+                            }
+                        }
+
+                        for (const e of elements) {
+                            const hasSemanticAttribute =
+                                Array.from(e.attributes ?? []).some(a =>
+                                    attrRegex.test(
+                                        String(a.name) + " " + String(a.value)));
+
+                            if (!hasSemanticAttribute) continue;
+
+                            for (const raw of [
+                                e.getAttribute("value"),
+                                e.getAttribute("data-value"),
+                                e.getAttribute("data-total"),
+                                e.getAttribute("data-amount")
+                            ]) {
+                                const v = num(raw);
+                                if (v && Number(v) > 0) return v;
+                            }
+                        }
+
+                        return "";
+                    };
+
+                    const summaryAmount = (root, exactLabel, directSelector="") => {
+                        if (!(root instanceof Element)) return "";
+
+                        if (directSelector) {
+                            const direct = root.querySelector(directSelector);
+                            if (direct instanceof HTMLElement && visible(direct)) {
+                                const v = num(direct.textContent);
+                                if (v && Number(v) > 0) return v;
+                            }
+                        }
+
+                        const rows = Array.from(
+                            root.querySelectorAll("order-form-summary .summary-item, .summary-item"))
+                            .filter(visible);
+
+                        for (const row of rows) {
+                            const label = Array.from(row.querySelectorAll("span"))
+                                .filter(visible)
+                                .find(s => norm(s.textContent)
+                                    .replace(/[:：]/g, "")
+                                    .trim() === exactLabel);
+
+                            if (!(label instanceof HTMLElement)) continue;
+
+                            const values = Array.from(row.querySelectorAll("span"))
+                                .filter(visible)
+                                .filter(s => s !== label);
+
+                            for (const value of values) {
+                                const v = num(value.textContent);
+                                if (v && Number(v) > 0) return v;
+                            }
+
+                            const rowText = norm(row.textContent);
+                            const withoutLabel = rowText.replace(exactLabel, " ");
+                            const v = num(withoutLabel);
+                            if (v && Number(v) > 0) return v;
+                        }
+
+                        return "";
+                    };
+
+                    const isinFrom = root => {
+                        if (!(root instanceof Element)) return "";
+                        for (const e of [root,...root.querySelectorAll("*")]) {
+                            for (const a of Array.from(e.attributes ?? [])) {
+                                const m=String(a.value??"").toUpperCase()
+                                    .match(/IR[A-Z0-9]{10}/);
+                                if (m) return m[0];
+                            }
+                        }
+                        return "";
+                    };
+
+                    if (location.origin !== expectedOrigin)
+                        return result("INVALID_ORIGIN","EasyTrader origin was not active.");
+
+                    let box = Array.from(
+                        document.querySelectorAll('[role="dialog"],dialog'))
+                        .filter(visible)
+                        .find(d=>d.querySelector("#quantity") && d.querySelector("#price"));
+
+                    if (!box) {
+                        for (const q of Array.from(document.querySelectorAll("#quantity")).filter(visible)) {
+                            let a=q.parentElement;
+                            for (let depth=0; depth<12 && a instanceof HTMLElement;
+                                 depth++, a=a.parentElement) {
+                                if (a===document.body || a===document.documentElement) break;
+                                const p=a.querySelector("#price");
+                                const send=Array.from(a.querySelectorAll("button"))
+                                    .find(b=>visible(b) &&
+                                        ["ارسال خرید","ارسال فروش"].includes(norm(b.textContent)));
+                                if (p && send) { box=a; break; }
+                            }
+                            if (box) break;
+                        }
+                    }
+
+                    if (!(box instanceof HTMLElement))
+                        return result("ORDER_FORM_NOT_FOUND","Official order form not found.");
+
+                    const q=box.querySelector("#quantity");
+                    const p=box.querySelector("#price");
+                    if (!(q instanceof HTMLInputElement) || !(p instanceof HTMLInputElement))
+                        return result("ORDER_INPUTS_NOT_FOUND","Order inputs not found.");
+
+                    const quantity=num(q.value);
+                    const price=num(p.value);
+                    if (!quantity || Number(quantity)<=0)
+                        return result("QUANTITY_NOT_READY","Quantity invalid.");
+                    if (!price || Number(price)<=0)
+                        return result("PRICE_NOT_READY","Price invalid.");
+
+                    const send=Array.from(box.querySelectorAll("button"))
+                        .find(b=>visible(b) &&
+                            ["ارسال خرید","ارسال فروش"].includes(norm(b.textContent)));
+                    if (!(send instanceof HTMLButtonElement))
+                        return result("SEND_ACTION_NOT_FOUND","Send action not found.");
+
+                    const side=norm(send.textContent)==="ارسال فروش" ? 1 : 0;
+                    const meta=window[metaKey] || {};
+                    const symbolName=norm(meta.symbolName || "");
+                    const symbolIsin=String(meta.symbolIsin || isinFrom(box) || "").toUpperCase();
+
+                    if (!symbolName || !symbolIsin)
+                        return result("INSTRUMENT_METADATA_NOT_READY","Instrument metadata not ready.");
+
+                    const commissionAmount =
+                        summaryAmount(box, "کارمزد معامله") ||
+                        labeledAmount(
+                            box,
+                            ["کارمزد معامله", "کارمزد", "مبلغ کارمزد"],
+                            /commission|fee|کارمزد/i);
+
+                    if (!commissionAmount || Number(commissionAmount) <= 0) {
+                        const style = getComputedStyle(box);
+                        const rect = box.getBoundingClientRect();
+
+                        const interesting = Array.from(box.querySelectorAll("*"))
+                            .filter(e => e instanceof HTMLElement)
+                            .map(e => {
+                                const text = norm(e.textContent);
+                                const attrs = Array.from(e.attributes ?? [])
+                                    .map(a => `${a.name}=${a.value}`)
+                                    .join(" ");
+                                if (!/کارمزد|جمع کل|ارزش|مبلغ|commission|fee|total|value/i
+                                    .test(text + " " + attrs)) {
+                                    return null;
+                                }
+
+                                const r = e.getBoundingClientRect();
+                                const s = getComputedStyle(e);
+
+                                return {
+                                    tag: e.tagName,
+                                    text: text.slice(0, 250),
+                                    attrs: attrs.slice(0, 400),
+                                    display: s.display,
+                                    visibility: s.visibility,
+                                    opacity: s.opacity,
+                                    zIndex: s.zIndex,
+                                    rect: {
+                                        x: Math.round(r.x),
+                                        y: Math.round(r.y),
+                                        w: Math.round(r.width),
+                                        h: Math.round(r.height)
+                                    }
+                                };
+                            })
+                            .filter(Boolean)
+                            .slice(0, 30);
+
+                        const diagnostic = {
+                            box: {
+                                text: norm(box.innerText).slice(0, 2500),
+                                display: style.display,
+                                visibility: style.visibility,
+                                opacity: style.opacity,
+                                zIndex: style.zIndex,
+                                pointerEvents: style.pointerEvents,
+                                rect: {
+                                    x: Math.round(rect.x),
+                                    y: Math.round(rect.y),
+                                    w: Math.round(rect.width),
+                                    h: Math.round(rect.height)
+                                }
+                            },
+                            interesting
+                        };
+
+                        return result("COMMISSION_NOT_READY",
+                            "Commission amount not found. DOM_DIAGNOSTIC=" +
+                            JSON.stringify(diagnostic).slice(0, 7000),
+                            symbolName,symbolIsin,price,quantity,side,"","");
+                    }
+
+                    const totalValue =
+                        summaryAmount(
+                            box,
+                            "جمع کل",
+                            '[data-cy="order-summary-total-expense"]') ||
+                        labeledAmount(
+                            box,
+                            ["جمع کل", "ارزش نهایی", "مبلغ نهایی", "ارزش سفارش",
+                             "مبلغ سفارش", "ارزش کل", "مبلغ کل",
+                             "ارزش معامله", "مبلغ قابل پرداخت", "قابل پرداخت", "جمع سفارش"],
+                            /total|value|amount|payable|ارزش|مبلغ/i);
+
+                    if (!totalValue || Number(totalValue) <= 0)
+                        return result("TOTAL_VALUE_NOT_READY",
+                            "Total order value not found.",
+                            symbolName,symbolIsin,price,quantity,side,
+                            commissionAmount,"");
+
+                    return result("FORM_READ","Official form read without submission.",
+                        symbolName,symbolIsin,price,quantity,side,
+                        commissionAmount,totalValue);
+                })()
+                """;
+        }
 
         /// <summary>
         /// اسکریپتی می‌سازد که فقط در دامنه رسمی EasyTrader، نماد و ISIN
@@ -838,6 +1303,39 @@ namespace FastOrder
                     return true;
                 })()
                 """;
+        }
+
+        public static OfficialOrderFormReadResult ParseOrderFormReadResult(
+            string executeScriptResult)
+        {
+            if (string.IsNullOrWhiteSpace(executeScriptResult))
+            {
+                return new OfficialOrderFormReadResult
+                {
+                    Status = "EMPTY_RESULT",
+                    Reason = "EasyTrader returned an empty form-read result."
+                };
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<OfficialOrderFormReadResult>(
+                    executeScriptResult,
+                    ResultOptions)
+                    ?? new OfficialOrderFormReadResult
+                    {
+                        Status = "INVALID_RESULT",
+                        Reason = "Form-read result could not be parsed."
+                    };
+            }
+            catch (JsonException)
+            {
+                return new OfficialOrderFormReadResult
+                {
+                    Status = "INVALID_RESULT",
+                    Reason = "Form-read result was not valid JSON."
+                };
+            }
         }
 
         public static OfficialOrderUiBridgeResult ParseResult(

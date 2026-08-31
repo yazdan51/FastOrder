@@ -130,12 +130,11 @@ namespace FastOrder
             }
 
             if (!double.IsFinite(order.Commission) ||
-                Math.Abs(
-                    order.Commission - ExpectedCommissionRate) >
-                0.000000000001)
+                order.Commission <= 0 ||
+                order.Commission >= 0.1)
             {
                 return OrderSubmissionValidationResult.Invalid(
-                    "نرخ کارمزد با مقدار تأییدشده مطابقت ندارد.");
+                    "نرخ کارمزد خوانده‌شده از فرم EasyTrader معتبر نیست.");
             }
 
             if (!DateTime.TryParseExact(
@@ -151,32 +150,12 @@ namespace FastOrder
 
             try
             {
-                long grossValue =
-                    checked(order.Price * order.Quantity);
+                _ = checked(order.Price * order.Quantity);
 
-                decimal commissionAmountDecimal =
-                    decimal.Round(
-                        grossValue * ExpectedCommissionRateDecimal,
-                        0,
-                        MidpointRounding.AwayFromZero);
-
-                if (commissionAmountDecimal > long.MaxValue)
+                if (order.TotalValue <= 0)
                 {
                     return OrderSubmissionValidationResult.Invalid(
-                        "مبلغ کارمزد از محدوده مجاز بزرگ‌تر است.");
-                }
-
-                long commissionAmount =
-                    decimal.ToInt64(
-                        commissionAmountDecimal);
-
-                long expectedTotalValue =
-                    checked(grossValue + commissionAmount);
-
-                if (order.TotalValue != expectedTotalValue)
-                {
-                    return OrderSubmissionValidationResult.Invalid(
-                        "مبلغ کل سفارش با محاسبه مستقل مطابقت ندارد.");
+                        "مبلغ کل خوانده‌شده از فرم EasyTrader معتبر نیست.");
                 }
             }
             catch (OverflowException)

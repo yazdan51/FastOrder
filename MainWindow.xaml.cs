@@ -92,128 +92,299 @@ namespace FastOrder
             Closing += MainWindow_Closing;
         }
 
-        private void PreviewOrderButton_Click(
+        private async void PreviewOrderButton_Click(
             object sender,
             RoutedEventArgs e)
         {
+            if (_scheduledOrderActive || _liveSubmissionInProgress)
+            {
+                SetStatus("زمان‌بندی یا ارسال قبلی هنوز فعال است.");
+                return;
+            }
+
+            if (!_webViewReady || Browser.CoreWebView2 == null)
+            {
+                SetStatus("EasyTrader هنوز آماده نیست.");
+                return;
+            }
+
             try
             {
-                if (_scheduledOrderActive ||
-                    _liveSubmissionInProgress)
-                {
-                    SetStatus(
-                        "زمان‌بندی یا نتیجه ارسال قبلی هنوز فعال است.");
-
-                    return;
-                }
-
                 ClearConfirmedOrder();
 
-                OrderEntryWindow entryWindow =
-                    new OrderEntryWindow
-                    {
-                        Owner = this
-                    };
+                string json = await Browser.CoreWebView2.ExecuteScriptAsync(
+                    OfficialOrderUiBridge.BuildOpenCurrentSymbolBuyDialogScript());
 
-                if (entryWindow.ShowDialog() !=
-                    true)
-                {
-                    SetStatus(
-                        "ورود اطلاعات سفارش لغو شد؛ ارسال انجام نشد.");
-
-                    return;
-                }
-
-                CreateOrderPayload payload =
-                    entryWindow.Payload
-                    ?? throw new InvalidOperationException(
-                        "Validated order payload was not created.");
-
-                OrderCalculationResult calculation =
-                    entryWindow.Calculation
-                    ?? throw new InvalidOperationException(
-                        "Validated order calculation was not created.");
-
-                string json =
-                    JsonSerializer.Serialize(
-                        payload,
-                        new JsonSerializerOptions
-                        {
-                            Encoder =
-                                System.Text.Encodings.Web
-                                    .JavaScriptEncoder
-                                    .UnsafeRelaxedJsonEscaping,
-
-                            WriteIndented = true
-                        });
-
-                OrderConfirmationWindow confirmationWindow =
-                    new OrderConfirmationWindow(
-                        payload,
-                        calculation,
-                        json)
-                    {
-                        Owner = this
-                    };
-
-                bool confirmed =
-                    confirmationWindow.ShowDialog() ==
-                    true;
-
-                if (confirmed)
-                {
-                    _confirmedOrderSnapshot =
-                        ConfirmedOrderSnapshot.Create(
-                            json);
-
-                    PrepareOrderButton.IsEnabled =
-                        true;
-
-                    PrepareOrderButton.Content =
-                        "آماده‌سازی محلی";
-                }
-                else
-                {
-                    ClearConfirmedOrder();
-                }
+                OfficialOrderUiBridgeResult result =
+                    OfficialOrderUiBridge.ParseResult(json);
 
                 WriteImportant("");
+                WriteImportant("========================================");
+                WriteImportant("OPEN CURRENT EASYTRADER ORDER FORM");
+                WriteImportant("========================================");
+                WriteImportant("STATUS: " + result.Status);
+                WriteImportant("HTTP POST: NOT SENT");
+                WriteImportant("========================================");
 
-                WriteImportant(
-                    "========================================");
+                bool opened =
+                    result.HasStatus(OfficialOrderUiBridge.DialogAlreadyOpenStatus) ||
+                    result.HasStatus(OfficialOrderUiBridge.DialogOpenRequestedStatus);
 
-                WriteImportant(
-                    "LOCAL ORDER CONFIRMATION");
+                ReadOrderFormButton.IsEnabled = opened;
 
-                WriteImportant(
-                    "========================================");
-
-                WriteImportant(
-                    "ارسال HTTP انجام نشد.");
-
-                WriteImportant(
-                    "RESULT: " +
-                    (confirmed
-                        ? "CONFIRMED"
-                        : "CANCELED"));
-
-                WriteImportant(
-                    "========================================");
-
-                SetStatus(
-                    confirmed
-                        ? "اطلاعات سفارش محلی تأیید شد؛ ارسال انجام نشد."
-                        : "تأیید سفارش لغو شد؛ ارسال انجام نشد.");
+                SetStatus(opened
+                    ? "فرم رسمی خرید باز شد؛ قیمت و تعداد را در EasyTrader وارد کنید، سپس «خواندن و تأیید فرم» را بزنید."
+                    : "فرم نماد جاری باز نشد: " + OfficialOrderUiBridge.GetUserMessage(result.Status));
             }
             catch (Exception ex)
             {
-                WriteImportant(
-                    "Payload Preview Error:");
-
-                WriteImportant(
-                    ex.ToString());
+                ReadOrderFormButton.IsEnabled = false;
+                WriteImportant("OPEN CURRENT ORDER FORM ERROR: " + ex.Message);
+                SetStatus("خطا در باز کردن فرم سفارش EasyTrader.");
             }
         }
+
+        private async void ReadOrderFormButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (_scheduledOrderActive || _liveSubmissionInProgress)
+            {
+                SetStatus("زمان‌بندی یا ارسال قبلی هنوز فعال است.");
+                return;
+            }
+
+            if (!_webViewReady || Browser.CoreWebView2 == null)
+            {
+                SetStatus("EasyTrader هنوز آماده نیست.");
+                return;
+            }
+
+            ReadOrderFormButton.IsEnabled = false;
+
+            try
+            {
+                string json = await Browser.CoreWebView2.ExecuteScriptAsync(
+                    OfficialOrderUiBridge.BuildReadCurrentOrderFormScript());
+
+                OfficialOrderFormReadResult form =
+                    OfficialOrderUiBridge.ParseOrderFormReadResult(json);
+
+                if (!form.HasStatus(OfficialOrderUiBridge.FormReadStatus))
+                {
+                    WriteImportant("");
+                    WriteImportant("========================================");
+                    WriteImportant("READ EASYTRADER FORM FAILED");
+                    WriteImportant("========================================");
+                    WriteImportant("STATUS: " + form.Status);
+                    WriteImportant("REASON: " + form.Reason);
+                    WriteImportant("SYMBOL: " + form.SymbolName);
+                    WriteImportant("ISIN: " + form.SymbolIsin);
+                    WriteImportant("PRICE: " + form.Price);
+                    WriteImportant("QUANTITY: " + form.Quantity);
+                    WriteImportant("COMMISSION: " + form.CommissionAmount);
+                    WriteImportant("TOTAL VALUE: " + form.TotalValue);
+                    WriteImportant("HTTP POST: NOT SENT");
+                    WriteImportant("========================================");
+
+                    ReadOrderFormButton.IsEnabled = true;
+                    SetStatus("اطلاعات فرم خوانده نشد: " + form.Status);
+                    return;
+                }
+
+                if (!TryBuildPayloadFromOfficialForm(
+                    form,
+                    out CreateOrderPayload? payload,
+                    out OrderCalculationResult? calculation,
+                    out string error) ||
+                    payload?.Order == null ||
+                    calculation == null)
+                {
+                    WriteImportant("");
+                    WriteImportant("========================================");
+                    WriteImportant("FORM DATA VALIDATION FAILED");
+                    WriteImportant("========================================");
+                    WriteImportant("ERROR: " + error);
+                    WriteImportant("SYMBOL: " + form.SymbolName);
+                    WriteImportant("ISIN: " + form.SymbolIsin);
+                    WriteImportant("PRICE: " + form.Price);
+                    WriteImportant("QUANTITY: " + form.Quantity);
+                    WriteImportant("COMMISSION: " + form.CommissionAmount);
+                    WriteImportant("TOTAL VALUE: " + form.TotalValue);
+                    WriteImportant("HTTP POST: NOT SENT");
+                    WriteImportant("========================================");
+
+                    ReadOrderFormButton.IsEnabled = true;
+                    SetStatus("اطلاعات خوانده‌شده معتبر نیست: " + error);
+                    return;
+                }
+
+                string payloadJson = JsonSerializer.Serialize(
+                    payload,
+                    new JsonSerializerOptions
+                    {
+                        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                        WriteIndented = true
+                    });
+
+                OrderConfirmationWindow confirmationWindow =
+                    new OrderConfirmationWindow(payload, calculation, payloadJson)
+                    {
+                        Owner = this
+                    };
+
+                if (confirmationWindow.ShowDialog() != true)
+                {
+                    ClearConfirmedOrder();
+                    ReadOrderFormButton.IsEnabled = true;
+                    SetStatus("تأیید سفارش لغو شد؛ هیچ سفارشی ارسال نشد.");
+                    return;
+                }
+
+                _confirmedOrderSnapshot = ConfirmedOrderSnapshot.Create(payloadJson);
+                PrepareOrderButton.IsEnabled = true;
+                PrepareOrderButton.Content = "آماده‌سازی محلی";
+
+                WriteImportant("");
+                WriteImportant("========================================");
+                WriteImportant("ORDER READ FROM EASYTRADER FORM");
+                WriteImportant("========================================");
+                WriteImportant("SYMBOL: " + payload.Order.SymbolName);
+                WriteImportant("ISIN: " + payload.Order.SymbolIsin);
+                WriteImportant("PRICE: " + payload.Order.Price);
+                WriteImportant("QUANTITY: " + payload.Order.Quantity);
+                WriteImportant("SIDE: BUY");
+                WriteImportant("COMMISSION AMOUNT (FROM EASYTRADER): " + form.CommissionAmount);
+                WriteImportant("COMMISSION RATE: DERIVED FROM EASYTRADER FORM");
+                WriteImportant("TOTAL VALUE (FROM EASYTRADER): " + form.TotalValue);
+                WriteImportant("HTTP POST: NOT SENT");
+                WriteImportant("========================================");
+
+                PrepareOrderButton_Click(PrepareOrderButton, new RoutedEventArgs());
+
+                SetStatus("فرم خوانده و تأیید شد؛ اگر LOCALLY READY است، «زمان‌بندی ارسال واقعی» را بزنید.");
+            }
+            catch (Exception ex)
+            {
+                ReadOrderFormButton.IsEnabled = true;
+                WriteImportant("READ EASYTRADER ORDER FORM ERROR: " + ex.Message);
+                SetStatus("خطا در خواندن فرم سفارش EasyTrader.");
+            }
+        }
+
+        private static bool TryBuildPayloadFromOfficialForm(
+            OfficialOrderFormReadResult form,
+            out CreateOrderPayload? payload,
+            out OrderCalculationResult? calculation,
+            out string error)
+        {
+            payload = null;
+            calculation = null;
+
+            string symbolName = (form.SymbolName ?? "").Trim();
+            string isin = (form.SymbolIsin ?? "").Trim().ToUpperInvariant();
+
+            if (string.IsNullOrWhiteSpace(symbolName))
+            {
+                error = "نام نماد قابل تشخیص نبود.";
+                return false;
+            }
+
+            if (isin.Length != 12 || !isin.StartsWith("IR", StringComparison.Ordinal))
+            {
+                error = "ISIN معتبر قابل تشخیص نبود.";
+                return false;
+            }
+
+            if (!long.TryParse(form.Price,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out long price) || price <= 0)
+            {
+                error = "قیمت معتبر خوانده نشد.";
+                return false;
+            }
+
+            if (!long.TryParse(form.Quantity,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out long quantity) || quantity <= 0)
+            {
+                error = "تعداد معتبر خوانده نشد.";
+                return false;
+            }
+
+            if (form.Side != 0)
+            {
+                error = "نسخه فعلی زمان‌بندی فقط خرید را پشتیبانی می‌کند.";
+                return false;
+            }
+
+            if (!long.TryParse(form.CommissionAmount,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out long commissionAmount) || commissionAmount <= 0)
+            {
+                error = "کارمزد معتبر از فرم EasyTrader خوانده نشد.";
+                return false;
+            }
+
+            if (!long.TryParse(form.TotalValue,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out long totalValueFromForm) || totalValueFromForm <= 0)
+            {
+                error = "قیمت کل معتبر از فرم EasyTrader خوانده نشد.";
+                return false;
+            }
+
+            try
+            {
+                OrderCalculationResult gross =
+                    OrderCalculator.Calculate(price, quantity, 0);
+
+                if (gross.GrossValue <= 0)
+                {
+                    error = "ارزش ناخالص سفارش معتبر نیست.";
+                    return false;
+                }
+
+                double commissionRate =
+                    (double)commissionAmount / gross.GrossValue;
+
+                calculation =
+                    OrderCalculator.Calculate(price, quantity, commissionAmount);
+
+                payload = new CreateOrderPayload
+                {
+                    Order = new Order
+                    {
+                        Commission = commissionRate,
+                        CreateDateTime = DateTime.Now.ToString(
+                            "M/d/yyyy, h:mm:ss tt",
+                            System.Globalization.CultureInfo.InvariantCulture),
+                        OrderFrom = 34,
+                        OrderModelType = 1,
+                        Price = price,
+                        Quantity = quantity,
+                        Side = 0,
+                        SymbolIsin = isin,
+                        SymbolName = symbolName,
+                        TotalValue = totalValueFromForm,
+                        ValidityType = 0
+                    }
+                };
+
+                error = "";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
         // =====================================================
         // WINDOW LOADED
         // =====================================================
@@ -1214,7 +1385,11 @@ namespace FastOrder
                         OfficialOrderUiBridgeResult preWarmResult =
                             await PrepareOfficialOrderFormAsync(
                                 coreWebView,
-                                order,
+                                CreateScheduledSliceOrder(
+                                    order,
+                                    Math.Min(
+                                        totalQuantity,
+                                        maxQuantityPerOrder)),
                                 preWarmNonce,
                                 cancellationSource.Token);
 

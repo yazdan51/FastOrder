@@ -51,11 +51,21 @@
                     Click="LoginStatusButton_Click"/>
 
             <Button x:Name="PreviewOrderButton"
-                    Content="بررسی و تأیید سفارش"
-                    Width="175"
+                    Content="باز کردن فرم نماد جاری"
+                    Width="185"
                     Height="36"
                     Margin="0,0,10,0"
+                    ToolTip="فرم رسمی خرید نماد جاری EasyTrader را باز می‌کند؛ ارسال انجام نمی‌شود."
                     Click="PreviewOrderButton_Click"/>
+
+            <Button x:Name="ReadOrderFormButton"
+                    Content="خواندن و تأیید فرم"
+                    Width="165"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    IsEnabled="False"
+                    ToolTip="نماد، ISIN، قیمت و تعداد را از فرم رسمی می‌خواند؛ ارسال انجام نمی‌شود."
+                    Click="ReadOrderFormButton_Click"/>
 
             <Button x:Name="PrepareOrderButton"
                     Content="آماده‌سازی محلی"
