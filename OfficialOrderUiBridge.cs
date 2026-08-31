@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -776,7 +776,16 @@ namespace FastOrder
 
             return $$"""
                 (() => {
-                    const result = (status, reason) => ({ status, reason });
+                    const result = (
+                        status,
+                        reason,
+                        clickX = 0,
+                        clickY = 0) => ({
+                            status,
+                            reason,
+                            clickX,
+                            clickY
+                        });
                     const expectedOrigin = {{expectedOrigin}};
                     const expectedSymbolName = {{expectedSymbolName}};
                     const expectedSymbolIsin = {{expectedSymbolIsin}};
@@ -851,43 +860,80 @@ namespace FastOrder
                             requestedAt: now
                         });
 
+                        window["__fastOrderCurrentInstrumentV1"] =
+                            Object.freeze({
+                                symbolName: expectedSymbolName,
+                                symbolIsin: expectedSymbolIsin,
+                                capturedAt: now
+                            });
+
+                        const rect =
+                            buyButton.getBoundingClientRect();
+
+                        buyButton.focus();
                         buyButton.click();
 
                         return result(
                             "DIALOG_OPEN_REQUESTED",
-                            "The official buy dialog was requested once.");
+                            "The official buy dialog was requested once.",
+                            rect.left + rect.width / 2,
+                            rect.top + rect.height / 2);
                     };
 
                     if (window.location.origin !== expectedOrigin) {
                         return result("INVALID_ORIGIN", "EasyTrader origin was not active.");
                     }
 
-                    const openOrderDialog = Array.from(
-                        document.querySelectorAll('[role="dialog"], dialog'))
-                        .filter(isVisible)
-                        .find(candidate =>
-                            candidate.querySelector('#quantity') &&
-                            candidate.querySelector('#price'));
+                    const visibleQuantity =
+                        Array.from(document.querySelectorAll('#quantity'))
+                            .filter(isVisible)[0];
 
-                    if (openOrderDialog) {
+                    const visiblePrice =
+                        Array.from(document.querySelectorAll('#price'))
+                            .filter(isVisible)[0];
+
+                    const visibleSubmit =
+                        document.querySelector(
+                            '[data-cy="oms-order-form-submit-button-buy"]');
+
+                    const orderFormOpen =
+                        visibleQuantity instanceof HTMLInputElement &&
+                        visiblePrice instanceof HTMLInputElement &&
+                        visibleSubmit instanceof HTMLButtonElement &&
+                        isVisible(visibleSubmit);
+
+                    if (orderFormOpen) {
                         delete window[dialogRequestProperty];
 
-                        const paddedDialogText =
-                            " " + normalizeText(openOrderDialog.textContent) + " ";
-                        const expected = normalizeText(expectedSymbolName);
+                        const currentInstrument =
+                            window["__fastOrderCurrentInstrumentV1"] || {};
+
+                        const currentSymbol =
+                            normalizeText(currentInstrument.symbolName || "");
+
+                        const expected =
+                            normalizeText(expectedSymbolName);
+
                         const symbolMatches =
-                            paddedDialogText.includes(" " + expected + " ");
+                            currentSymbol === expected ||
+                            currentSymbol.startsWith(expected + " ") ||
+                            expected.startsWith(currentSymbol + " ");
+
+                        const isinMatches =
+                            String(currentInstrument.symbolIsin || "")
+                                .toUpperCase() ===
+                            expectedSymbolIsin.toUpperCase();
 
                         if (!symbolMatches ||
-                            !containsIsin(openOrderDialog)) {
+                            !isinMatches) {
                             return result(
                                 "ACTIVE_DIALOG_MISMATCH",
-                                "An order dialog for a different instrument is already open.");
+                                "An order form for a different instrument is already open.");
                         }
 
                         return result(
                             "DIALOG_ALREADY_OPEN",
-                            "The matching official buy dialog is already open.");
+                            "The matching official buy form is already open.");
                     }
 
                     const expected = normalizeText(expectedSymbolName);
@@ -1060,12 +1106,9 @@ namespace FastOrder
                             element.getClientRects().length > 0;
                     };
                     const findOrderContainer = () => {
-                        const candidates = Array.from(
-                            document.querySelectorAll('[role="dialog"], dialog'))
-                            .filter(candidate =>
-                                isVisible(candidate) &&
-                                candidate.querySelector('#quantity') &&
-                                candidate.querySelector('#price'));
+                        const submitSelector =
+                            '[data-cy="oms-order-form-submit-button-buy"],' +
+                            '[data-cy="oms-order-form-submit-button-sell"]';
 
                         const quantityInputs = Array.from(
                             document.querySelectorAll('#quantity'))
@@ -1075,47 +1118,28 @@ namespace FastOrder
                             let ancestor = quantityInput.parentElement;
 
                             for (let depth = 0;
-                                depth < 12 && ancestor instanceof HTMLElement;
+                                depth < 24 && ancestor instanceof HTMLElement;
                                 depth += 1, ancestor = ancestor.parentElement) {
+                                const priceInput =
+                                    ancestor.querySelector('#price');
+                                const sendButton =
+                                    ancestor.querySelector(submitSelector);
+
+                                if (priceInput instanceof HTMLInputElement &&
+                                    sendButton instanceof HTMLButtonElement &&
+                                    isVisible(priceInput) &&
+                                    isVisible(sendButton)) {
+                                    return ancestor;
+                                }
+
                                 if (ancestor === document.body ||
                                     ancestor === document.documentElement) {
                                     break;
                                 }
-
-                                const priceInput =
-                                    ancestor.querySelector('#price');
-                                const sendButton = Array.from(
-                                    ancestor.querySelectorAll('button'))
-                                    .find(button =>
-                                        isVisible(button) &&
-                                        normalizeText(button.textContent) === "ارسال خرید");
-
-                                if (priceInput &&
-                                    sendButton &&
-                                    !candidates.includes(ancestor)) {
-                                    candidates.push(ancestor);
-                                }
                             }
                         }
 
-                        const expected = normalizeText(expectedSymbolName);
-                        const expectedIsinUpper = expectedSymbolIsin.toUpperCase();
-
-                        return candidates.find(candidate => {
-                            const paddedText =
-                                " " + normalizeText(candidate.textContent) + " ";
-                            const symbolMatches =
-                                paddedText.includes(" " + expected + " ");
-                            const isinMatches = [candidate, ...candidate.querySelectorAll('*')]
-                                .some(element =>
-                                    Array.from(element.attributes ?? []).some(attribute =>
-                                        String(attribute.value ?? "")
-                                            .toUpperCase()
-                                            .includes(expectedIsinUpper)));
-
-                            return symbolMatches &&
-                                isinMatches;
-                        }) || candidates[0] || null;
+                        return null;
                     };
 
                     if (window.location.origin !== expectedOrigin) {
@@ -1129,34 +1153,53 @@ namespace FastOrder
                         return result("ORDER_DIALOG_NOT_FOUND", "Official buy dialog was not found.");
                     }
 
-                    const normalizedExpectedSymbol = normalizeText(expectedSymbolName);
-                    const paddedDialogText = " " + normalizeText(dialog.textContent) + " ";
-                    const symbolElements = Array.from(
-                        dialog.querySelectorAll('a, [role="link"], [aria-label]'))
-                        .filter(isVisible);
-                    const symbolObserved = symbolElements.some(element => {
-                        const text = normalizeText(
-                            element.textContent ||
-                            element.getAttribute('aria-label'));
-                        return text === normalizedExpectedSymbol ||
-                            text.startsWith(normalizedExpectedSymbol + " ");
-                    }) || paddedDialogText.includes(
-                        " " + normalizedExpectedSymbol + " ");
+                    const currentInstrument =
+                        window["__fastOrderCurrentInstrumentV1"] || {};
+
+                    const normalizedExpectedSymbol =
+                        normalizeText(expectedSymbolName);
+
+                    const currentSymbol =
+                        normalizeText(currentInstrument.symbolName || "");
+
+                    const paddedDialogText =
+                        " " + normalizeText(dialog.textContent) + " ";
+
+                    const symbolObserved =
+                        currentSymbol === normalizedExpectedSymbol ||
+                        currentSymbol.startsWith(normalizedExpectedSymbol + " ") ||
+                        normalizedExpectedSymbol.startsWith(currentSymbol + " ") ||
+                        paddedDialogText.includes(
+                            " " + normalizedExpectedSymbol + " ");
 
                     if (!symbolObserved) {
-                        return result("SYMBOL_MISMATCH", "Visible symbol did not match the confirmed order.");
+                        return result(
+                            "SYMBOL_MISMATCH",
+                            "Visible/current symbol did not match the confirmed order.");
                     }
 
-                    const expectedIsinUpper = expectedSymbolIsin.toUpperCase();
-                    const instrumentElements = [dialog, ...dialog.querySelectorAll('*')];
-                    const isinObserved = instrumentElements.some(element =>
-                        Array.from(element.attributes ?? []).some(attribute =>
-                            String(attribute.value ?? "")
-                                .toUpperCase()
-                                .includes(expectedIsinUpper)));
+                    const expectedIsinUpper =
+                        expectedSymbolIsin.toUpperCase();
+
+                    const currentIsin =
+                        String(currentInstrument.symbolIsin || "")
+                            .toUpperCase();
+
+                    const instrumentElements =
+                        [dialog, ...dialog.querySelectorAll('*')];
+
+                    const isinObserved =
+                        currentIsin === expectedIsinUpper ||
+                        instrumentElements.some(element =>
+                            Array.from(element.attributes ?? []).some(attribute =>
+                                String(attribute.value ?? "")
+                                    .toUpperCase()
+                                    .includes(expectedIsinUpper)));
 
                     if (!isinObserved) {
-                        return result("INSTRUMENT_NOT_VERIFIED", "ISIN was not present in the official dialog metadata.");
+                        return result(
+                            "INSTRUMENT_NOT_VERIFIED",
+                            "ISIN did not match the confirmed order.");
                     }
 
                     const quantityInput = dialog.querySelector('#quantity');
@@ -1167,10 +1210,13 @@ namespace FastOrder
                         return result("ORDER_INPUTS_NOT_FOUND", "Official order inputs were not available.");
                     }
 
-                    const sendButton = Array.from(dialog.querySelectorAll('button'))
-                        .find(button =>
-                            isVisible(button) &&
-                            normalizeText(button.textContent) === "ارسال خرید");
+                    const sendButton =
+                        dialog.querySelector(
+                            '[data-cy="oms-order-form-submit-button-buy"]') ||
+                        Array.from(dialog.querySelectorAll('button'))
+                            .find(button =>
+                                isVisible(button) &&
+                                normalizeText(button.textContent) === "ارسال خرید");
 
                     if (!(sendButton instanceof HTMLButtonElement)) {
                         return result("ORDER_ACTION_NOT_FOUND", "Official buy action was not found.");
@@ -1292,12 +1338,9 @@ namespace FastOrder
                             element.getClientRects().length > 0;
                     };
                     const findOrderContainer = () => {
-                        const candidates = Array.from(
-                            document.querySelectorAll('[role="dialog"], dialog'))
-                            .filter(candidate =>
-                                isVisible(candidate) &&
-                                candidate.querySelector('#quantity') &&
-                                candidate.querySelector('#price'));
+                        const submitSelector =
+                            '[data-cy="oms-order-form-submit-button-buy"],' +
+                            '[data-cy="oms-order-form-submit-button-sell"]';
 
                         const quantityInputs = Array.from(
                             document.querySelectorAll('#quantity'))
@@ -1307,47 +1350,28 @@ namespace FastOrder
                             let ancestor = quantityInput.parentElement;
 
                             for (let depth = 0;
-                                depth < 12 && ancestor instanceof HTMLElement;
+                                depth < 24 && ancestor instanceof HTMLElement;
                                 depth += 1, ancestor = ancestor.parentElement) {
+                                const priceInput =
+                                    ancestor.querySelector('#price');
+                                const sendButton =
+                                    ancestor.querySelector(submitSelector);
+
+                                if (priceInput instanceof HTMLInputElement &&
+                                    sendButton instanceof HTMLButtonElement &&
+                                    isVisible(priceInput) &&
+                                    isVisible(sendButton)) {
+                                    return ancestor;
+                                }
+
                                 if (ancestor === document.body ||
                                     ancestor === document.documentElement) {
                                     break;
                                 }
-
-                                const priceInput =
-                                    ancestor.querySelector('#price');
-                                const sendButton = Array.from(
-                                    ancestor.querySelectorAll('button'))
-                                    .find(button =>
-                                        isVisible(button) &&
-                                        normalizeText(button.textContent) === "ارسال خرید");
-
-                                if (priceInput &&
-                                    sendButton &&
-                                    !candidates.includes(ancestor)) {
-                                    candidates.push(ancestor);
-                                }
                             }
                         }
 
-                        const expected = normalizeText(expectedSymbolName);
-                        const expectedIsinUpper = expectedSymbolIsin.toUpperCase();
-
-                        return candidates.find(candidate => {
-                            const paddedText =
-                                " " + normalizeText(candidate.textContent) + " ";
-                            const symbolMatches =
-                                paddedText.includes(" " + expected + " ");
-                            const isinMatches = [candidate, ...candidate.querySelectorAll('*')]
-                                .some(element =>
-                                    Array.from(element.attributes ?? []).some(attribute =>
-                                        String(attribute.value ?? "")
-                                            .toUpperCase()
-                                            .includes(expectedIsinUpper)));
-
-                            return symbolMatches &&
-                                isinMatches;
-                        }) || candidates[0] || null;
+                        return null;
                     };
 
                     if (window.location.origin !== expectedOrigin) {
@@ -1372,34 +1396,53 @@ namespace FastOrder
                         return result("ORDER_DIALOG_NOT_FOUND", "Official buy dialog was not found.");
                     }
 
-                    const normalizedExpectedSymbol = normalizeText(expectedSymbolName);
-                    const paddedDialogText = " " + normalizeText(dialog.textContent) + " ";
-                    const symbolElements = Array.from(
-                        dialog.querySelectorAll('a, [role="link"], [aria-label]'))
-                        .filter(isVisible);
-                    const symbolObserved = symbolElements.some(element => {
-                        const text = normalizeText(
-                            element.textContent ||
-                            element.getAttribute('aria-label'));
-                        return text === normalizedExpectedSymbol ||
-                            text.startsWith(normalizedExpectedSymbol + " ");
-                    }) || paddedDialogText.includes(
-                        " " + normalizedExpectedSymbol + " ");
+                    const currentInstrument =
+                        window["__fastOrderCurrentInstrumentV1"] || {};
+
+                    const normalizedExpectedSymbol =
+                        normalizeText(expectedSymbolName);
+
+                    const currentSymbol =
+                        normalizeText(currentInstrument.symbolName || "");
+
+                    const paddedDialogText =
+                        " " + normalizeText(dialog.textContent) + " ";
+
+                    const symbolObserved =
+                        currentSymbol === normalizedExpectedSymbol ||
+                        currentSymbol.startsWith(normalizedExpectedSymbol + " ") ||
+                        normalizedExpectedSymbol.startsWith(currentSymbol + " ") ||
+                        paddedDialogText.includes(
+                            " " + normalizedExpectedSymbol + " ");
 
                     if (!symbolObserved) {
-                        return result("SYMBOL_MISMATCH", "Visible symbol did not match the confirmed order.");
+                        return result(
+                            "SYMBOL_MISMATCH",
+                            "Visible/current symbol did not match the confirmed order.");
                     }
 
-                    const expectedIsinUpper = expectedSymbolIsin.toUpperCase();
-                    const instrumentElements = [dialog, ...dialog.querySelectorAll('*')];
-                    const isinObserved = instrumentElements.some(element =>
-                        Array.from(element.attributes ?? []).some(attribute =>
-                            String(attribute.value ?? "")
-                                .toUpperCase()
-                                .includes(expectedIsinUpper)));
+                    const expectedIsinUpper =
+                        expectedSymbolIsin.toUpperCase();
+
+                    const currentIsin =
+                        String(currentInstrument.symbolIsin || "")
+                            .toUpperCase();
+
+                    const instrumentElements =
+                        [dialog, ...dialog.querySelectorAll('*')];
+
+                    const isinObserved =
+                        currentIsin === expectedIsinUpper ||
+                        instrumentElements.some(element =>
+                            Array.from(element.attributes ?? []).some(attribute =>
+                                String(attribute.value ?? "")
+                                    .toUpperCase()
+                                    .includes(expectedIsinUpper)));
 
                     if (!isinObserved) {
-                        return result("INSTRUMENT_NOT_VERIFIED", "ISIN was not present in the official dialog metadata.");
+                        return result(
+                            "INSTRUMENT_NOT_VERIFIED",
+                            "ISIN did not match the confirmed order.");
                     }
 
                     const quantityInput = dialog.querySelector('#quantity');
@@ -1412,10 +1455,13 @@ namespace FastOrder
                         return result("ORDER_VALUES_CHANGED", "Official order values changed after preparation.");
                     }
 
-                    const sendButton = Array.from(dialog.querySelectorAll('button'))
-                        .find(button =>
-                            isVisible(button) &&
-                            normalizeText(button.textContent) === "ارسال خرید");
+                    const sendButton =
+                        dialog.querySelector(
+                            '[data-cy="oms-order-form-submit-button-buy"]') ||
+                        Array.from(dialog.querySelectorAll('button'))
+                            .find(button =>
+                                isVisible(button) &&
+                                normalizeText(button.textContent) === "ارسال خرید");
 
                     if (!(sendButton instanceof HTMLButtonElement)) {
                         return result("ORDER_ACTION_NOT_FOUND", "Official buy action was not found.");

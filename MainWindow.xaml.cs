@@ -2520,6 +2520,49 @@ namespace FastOrder
                 if (ensureResult.HasStatus(
                     OfficialOrderUiBridge.DialogOpenRequestedStatus))
                 {
+                    if (ensureResult.ClickX > 0 &&
+                        ensureResult.ClickY > 0)
+                    {
+                        string moveJson = JsonSerializer.Serialize(new
+                        {
+                            type = "mouseMoved",
+                            x = ensureResult.ClickX,
+                            y = ensureResult.ClickY,
+                            button = "none",
+                            clickCount = 0
+                        });
+
+                        string downJson = JsonSerializer.Serialize(new
+                        {
+                            type = "mousePressed",
+                            x = ensureResult.ClickX,
+                            y = ensureResult.ClickY,
+                            button = "left",
+                            clickCount = 1
+                        });
+
+                        string upJson = JsonSerializer.Serialize(new
+                        {
+                            type = "mouseReleased",
+                            x = ensureResult.ClickX,
+                            y = ensureResult.ClickY,
+                            button = "left",
+                            clickCount = 1
+                        });
+
+                        await coreWebView.CallDevToolsProtocolMethodAsync(
+                            "Input.dispatchMouseEvent",
+                            moveJson);
+
+                        await coreWebView.CallDevToolsProtocolMethodAsync(
+                            "Input.dispatchMouseEvent",
+                            downJson);
+
+                        await coreWebView.CallDevToolsProtocolMethodAsync(
+                            "Input.dispatchMouseEvent",
+                            upJson);
+                    }
+
                     await Task.Delay(
                         400,
                         cancellationToken);
