@@ -2105,13 +2105,59 @@ namespace FastOrder
         {
             try
             {
-                await Task.Delay(
-                    250);
+                DateTimeOffset primeDeadline =
+                    DateTimeOffset.Now +
+                    TimeSpan.FromMilliseconds(
+                        850);
 
-                for (int attempt = 0;
-                    attempt < 4;
-                    attempt++)
+                bool trustedBuyClickRequested =
+                    false;
+
+                while (DateTimeOffset.Now <
+                    primeDeadline)
                 {
+                    string nonce =
+                        Guid.NewGuid()
+                            .ToString(
+                                "N");
+
+                    string prepareJson =
+                        await coreWebView.ExecuteScriptAsync(
+                            OfficialOrderUiBridge.BuildPrepareScript(
+                                order,
+                                nonce));
+
+                    OfficialOrderUiBridgeResult prepareResult =
+                        OfficialOrderUiBridge.ParseResult(
+                            prepareJson);
+
+                    if (prepareResult.HasStatus(
+                        OfficialOrderUiBridge.PreparedStatus))
+                    {
+                        await TryClearOfficialPreparedStateAsync(
+                            coreWebView,
+                            nonce);
+
+                        WriteImportant(
+                            "NEXT FORM PRIME: READY");
+
+                        return;
+                    }
+
+                    await TryClearOfficialPreparedStateAsync(
+                        coreWebView,
+                        nonce);
+
+                    if (!prepareResult.HasStatus(
+                        "ORDER_DIALOG_NOT_FOUND"))
+                    {
+                        WriteImportant(
+                            "NEXT FORM PRIME STATUS: " +
+                            prepareResult.Status);
+
+                        return;
+                    }
+
                     string ensureJson =
                         await coreWebView.ExecuteScriptAsync(
                             OfficialOrderUiBridge.BuildEnsureBuyDialogScript(
@@ -2124,7 +2170,8 @@ namespace FastOrder
                     if (ensureResult.HasStatus(
                         OfficialOrderUiBridge.DialogOpenRequestedStatus))
                     {
-                        if (ensureResult.ClickX > 0 &&
+                        if (!trustedBuyClickRequested &&
+                            ensureResult.ClickX > 0 &&
                             ensureResult.ClickY > 0)
                         {
                             string moveJson = JsonSerializer.Serialize(new
@@ -2166,35 +2213,33 @@ namespace FastOrder
                                 "Input.dispatchMouseEvent",
                                 upJson);
 
+                            trustedBuyClickRequested =
+                                true;
+
                             WriteImportant(
                                 "NEXT FORM PRIME: TRUSTED BUY CLICK REQUESTED");
                         }
 
-                        return;
+                        await Task.Delay(
+                            75);
+
+                        continue;
                     }
 
                     if (ensureResult.HasStatus(
                         OfficialOrderUiBridge.DialogAlreadyOpenStatus))
                     {
-                        if (attempt < 3)
-                        {
-                            await Task.Delay(
-                                100);
+                        await Task.Delay(
+                            50);
 
-                            continue;
-                        }
-
-                        WriteImportant(
-                            "NEXT FORM PRIME: FORM ALREADY OPEN");
-
-                        return;
+                        continue;
                     }
 
                     if (ensureResult.HasStatus(
                         OfficialOrderUiBridge.SymbolSelectionRequestedStatus))
                     {
                         await Task.Delay(
-                            100);
+                            75);
 
                         continue;
                     }
@@ -2207,7 +2252,7 @@ namespace FastOrder
                 }
 
                 WriteImportant(
-                    "NEXT FORM PRIME: NO STABLE FORM STATE BEFORE NEXT SLOT");
+                    "NEXT FORM PRIME: DEADLINE EXPIRED BEFORE READY");
             }
             catch (Exception ex)
             {
