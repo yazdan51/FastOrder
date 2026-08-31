@@ -2062,6 +2062,14 @@ namespace FastOrder
                     ": " +
                     result.Status);
 
+                if (result.HasStatus(
+                    OfficialOrderUiBridge.ClickedStatus))
+                {
+                    await PrimeNextScheduledOrderFormAsync(
+                        coreWebView,
+                        order);
+                }
+
                 return result;
             }
             catch (OperationCanceledException)
@@ -2088,6 +2096,124 @@ namespace FastOrder
                 await TryClearOfficialPreparedStateAsync(
                     coreWebView,
                     nonce);
+            }
+        }
+
+        private async Task PrimeNextScheduledOrderFormAsync(
+            CoreWebView2 coreWebView,
+            Order order)
+        {
+            try
+            {
+                await Task.Delay(
+                    250);
+
+                for (int attempt = 0;
+                    attempt < 4;
+                    attempt++)
+                {
+                    string ensureJson =
+                        await coreWebView.ExecuteScriptAsync(
+                            OfficialOrderUiBridge.BuildEnsureBuyDialogScript(
+                                order));
+
+                    OfficialOrderUiBridgeResult ensureResult =
+                        OfficialOrderUiBridge.ParseResult(
+                            ensureJson);
+
+                    if (ensureResult.HasStatus(
+                        OfficialOrderUiBridge.DialogOpenRequestedStatus))
+                    {
+                        if (ensureResult.ClickX > 0 &&
+                            ensureResult.ClickY > 0)
+                        {
+                            string moveJson = JsonSerializer.Serialize(new
+                            {
+                                type = "mouseMoved",
+                                x = ensureResult.ClickX,
+                                y = ensureResult.ClickY,
+                                button = "none",
+                                clickCount = 0
+                            });
+
+                            string downJson = JsonSerializer.Serialize(new
+                            {
+                                type = "mousePressed",
+                                x = ensureResult.ClickX,
+                                y = ensureResult.ClickY,
+                                button = "left",
+                                clickCount = 1
+                            });
+
+                            string upJson = JsonSerializer.Serialize(new
+                            {
+                                type = "mouseReleased",
+                                x = ensureResult.ClickX,
+                                y = ensureResult.ClickY,
+                                button = "left",
+                                clickCount = 1
+                            });
+
+                            await coreWebView.CallDevToolsProtocolMethodAsync(
+                                "Input.dispatchMouseEvent",
+                                moveJson);
+
+                            await coreWebView.CallDevToolsProtocolMethodAsync(
+                                "Input.dispatchMouseEvent",
+                                downJson);
+
+                            await coreWebView.CallDevToolsProtocolMethodAsync(
+                                "Input.dispatchMouseEvent",
+                                upJson);
+
+                            WriteImportant(
+                                "NEXT FORM PRIME: TRUSTED BUY CLICK REQUESTED");
+                        }
+
+                        return;
+                    }
+
+                    if (ensureResult.HasStatus(
+                        OfficialOrderUiBridge.DialogAlreadyOpenStatus))
+                    {
+                        if (attempt < 3)
+                        {
+                            await Task.Delay(
+                                100);
+
+                            continue;
+                        }
+
+                        WriteImportant(
+                            "NEXT FORM PRIME: FORM ALREADY OPEN");
+
+                        return;
+                    }
+
+                    if (ensureResult.HasStatus(
+                        OfficialOrderUiBridge.SymbolSelectionRequestedStatus))
+                    {
+                        await Task.Delay(
+                            100);
+
+                        continue;
+                    }
+
+                    WriteImportant(
+                        "NEXT FORM PRIME STATUS: " +
+                        ensureResult.Status);
+
+                    return;
+                }
+
+                WriteImportant(
+                    "NEXT FORM PRIME: NO STABLE FORM STATE BEFORE NEXT SLOT");
+            }
+            catch (Exception ex)
+            {
+                WriteImportant(
+                    "NEXT FORM PRIME ERROR: " +
+                    ex.Message);
             }
         }
 
