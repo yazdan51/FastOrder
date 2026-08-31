@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Text;
 using System.Windows;
 
 namespace FastOrder
@@ -14,6 +15,8 @@ namespace FastOrder
             "HH:mm:ss"
         };
 
+        private readonly long _totalQuantity;
+
         public DateTimeOffset ScheduledStartAt
         {
             get;
@@ -21,6 +24,12 @@ namespace FastOrder
         }
 
         public DateTimeOffset ScheduledEndAt
+        {
+            get;
+            private set;
+        }
+
+        public long MaxQuantityPerOrder
         {
             get;
             private set;
@@ -40,6 +49,9 @@ namespace FastOrder
                     "Order fingerprint cannot be empty.",
                     nameof(shortFingerprint));
             }
+
+            _totalQuantity =
+                order.Quantity;
 
             InitializeComponent();
 
@@ -114,6 +126,10 @@ namespace FastOrder
                 defaultEnd.ToString(
                     "HH:mm:ss",
                     CultureInfo.InvariantCulture);
+
+            MaxQuantityPerOrderTextBox.Text =
+                _totalQuantity.ToString(
+                    CultureInfo.InvariantCulture);
         }
 
         private static string FormatNumber(
@@ -140,6 +156,7 @@ namespace FastOrder
             if (!TryCreateSchedule(
                 out DateTimeOffset startAt,
                 out DateTimeOffset endAt,
+                out long maxQuantityPerOrder,
                 out string errorMessage))
             {
                 MessageBox.Show(
@@ -158,6 +175,9 @@ namespace FastOrder
             ScheduledEndAt =
                 endAt;
 
+            MaxQuantityPerOrder =
+                maxQuantityPerOrder;
+
             DialogResult =
                 true;
         }
@@ -165,6 +185,7 @@ namespace FastOrder
         private bool TryCreateSchedule(
             out DateTimeOffset startAt,
             out DateTimeOffset endAt,
+            out long maxQuantityPerOrder,
             out string errorMessage)
         {
             startAt =
@@ -173,8 +194,30 @@ namespace FastOrder
             endAt =
                 default;
 
+            maxQuantityPerOrder =
+                0;
+
             errorMessage =
                 "";
+
+            if (!TryParsePositiveLong(
+                MaxQuantityPerOrderTextBox.Text,
+                out maxQuantityPerOrder))
+            {
+                errorMessage =
+                    "حداکثر حجم هر سفارش باید یک عدد صحیح بزرگ‌تر از صفر باشد.";
+
+                return false;
+            }
+
+            if (maxQuantityPerOrder >
+                _totalQuantity)
+            {
+                errorMessage =
+                    "حداکثر حجم هر سفارش نمی‌تواند از حجم کل بیشتر باشد.";
+
+                return false;
+            }
 
             if (!TimeOnly.TryParseExact(
                 StartTimeTextBox.Text?.Trim(),
@@ -257,6 +300,57 @@ namespace FastOrder
             }
 
             return true;
+        }
+
+        private static bool TryParsePositiveLong(
+            string? text,
+            out long value)
+        {
+            string normalized =
+                NormalizeNumber(
+                    text ?? "");
+
+            return
+                long.TryParse(
+                    normalized,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out value)
+                &&
+                value > 0;
+        }
+
+        private static string NormalizeNumber(
+            string text)
+        {
+            StringBuilder result =
+                new StringBuilder(
+                    text.Length);
+
+            foreach (char character in
+                text.Trim())
+            {
+                if (character is ',' or '٬' or '،' ||
+                    char.IsWhiteSpace(character))
+                {
+                    continue;
+                }
+
+                result.Append(
+                    character switch
+                    {
+                        >= '۰' and <= '۹' =>
+                            (char)('0' + character - '۰'),
+
+                        >= '٠' and <= '٩' =>
+                            (char)('0' + character - '٠'),
+
+                        _ =>
+                            character
+                    });
+            }
+
+            return result.ToString();
         }
     }
 }

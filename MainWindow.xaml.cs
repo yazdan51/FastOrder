@@ -27,7 +27,11 @@ namespace FastOrder
 
         private static readonly TimeSpan ScheduledOrderRetryDelay =
             TimeSpan.FromSeconds(
-                5);
+                1);
+
+        private static readonly TimeSpan ScheduledOrderPreWarmLeadTime =
+            TimeSpan.FromSeconds(
+                2);
 
         private bool _webViewReady = false;
 
@@ -48,6 +52,10 @@ namespace FastOrder
             _activeLiveSubmissionCompletion;
         private CancellationTokenSource? _scheduledOrderCancellation;
         private bool _scheduledOrderActive = false;
+
+        private bool _webViewTimingTestActive = false;
+
+        private bool _orderUiDryRunTimingActive = false;
 
         private enum ScheduledOrderAttemptOutcome
         {
@@ -1046,7 +1054,8 @@ namespace FastOrder
                     snapshot,
                     order,
                     confirmationWindow.ScheduledStartAt,
-                    confirmationWindow.ScheduledEndAt);
+                    confirmationWindow.ScheduledEndAt,
+                    confirmationWindow.MaxQuantityPerOrder);
             }
             catch (Exception)
             {
@@ -1064,24 +1073,32 @@ namespace FastOrder
         }
 
         /// <summary>
-        /// چرخه عمر زمان‌بندی را مدیریت می‌کند: انتظار تا شروع، اجرای تلاش‌ها،
-        /// توقف با اولین پاسخ موفق، توقف Fail-Closed در نتیجه مبهم و پاک‌سازی.
+        /// زمان‌بند واقعی یک‌ثانیه‌ای: شروع تلاش هر slot به نتیجه UI یا HTTP
+        /// slot قبلی وابسته نیست. برای جلوگیری از oversend، حجم هر تلاش پیش از
+        /// شروع به صورت in-flight رزرو می‌شود و فقط در صورت CLICKED شدن به sent
+        /// منتقل می‌شود؛ شکست پیش از کلیک رزرو را آزاد می‌کند.
         /// </summary>
-        /// <remarks>
-        /// فعال‌سازی عملی این قابلیت باید فقط در بازه و سازوکار مجاز کارگزاری
-        /// انجام شود. این متد مجازبودن زمان انتخاب‌شده را از مقررات استنتاج نمی‌کند.
-        /// </remarks>
         private async Task RunScheduledOrderAsync(
             CoreWebView2 coreWebView,
             ConfirmedOrderSnapshot snapshot,
             Order order,
             DateTimeOffset startAt,
-            DateTimeOffset endAt)
+            DateTimeOffset endAt,
+            long maxQuantityPerOrder)
         {
             if (endAt <= startAt)
             {
                 WriteLiveSubmissionBlocked(
                     "بازه زمانی ارسال معتبر نیست.");
+
+                return;
+            }
+
+            if (maxQuantityPerOrder <= 0 ||
+                maxQuantityPerOrder > order.Quantity)
+            {
+                WriteLiveSubmissionBlocked(
+                    "حداکثر حجم هر سفارش معتبر نیست.");
 
                 return;
             }
@@ -1098,62 +1115,175 @@ namespace FastOrder
             SetScheduledOrderControls(
                 true);
 
+            long totalQuantity =
+                order.Quantity;
+
+            long sentQuantity =
+                0;
+
+            long inFlightQuantity =
+                0;
+
+            int clickedOrderCount =
+                0;
+
+            int slotNumber =
+                0;
+
+            object accountingLock =
+                new object();
+
+            System.Collections.Generic.List<Task>
+                activeDispatchTasks =
+                    new System.Collections.Generic.List<Task>();
+
             WriteImportant("");
             WriteImportant(
                 "========================================");
             WriteImportant(
-                "SCHEDULED ORDER ARMED");
+                "NON-BLOCKING CLOCK SPLIT ORDER ARMED");
             WriteImportant(
                 "========================================");
             WriteImportant(
                 "START: " +
                 startAt.ToString(
-                    "yyyy-MM-dd HH:mm:ss zzz"));
+                    "yyyy-MM-dd HH:mm:ss.fff zzz"));
             WriteImportant(
                 "END: " +
                 endAt.ToString(
-                    "yyyy-MM-dd HH:mm:ss zzz"));
+                    "yyyy-MM-dd HH:mm:ss.fff zzz"));
             WriteImportant(
-                "RETRY DELAY: " +
-                ScheduledOrderRetryDelay.TotalSeconds +
-                " SECONDS");
+                "CLOCK SLOT: 1 SECOND");
             WriteImportant(
-                "PAYLOAD FINGERPRINT: " +
-                snapshot.ShortFingerprint);
+                "WAIT FOR PREVIOUS UI DISPATCH: NO");
             WriteImportant(
-                "DIRECT API CREDENTIALS: NOT ACCESSED");
+                "WAIT FOR PREVIOUS HTTP RESPONSE: NO");
             WriteImportant(
-                "HTTP POST: NOT SENT YET");
+                "TOTAL QUANTITY: " +
+                totalQuantity);
+            WriteImportant(
+                "MAX QUANTITY PER ORDER: " +
+                maxQuantityPerOrder);
+            WriteImportant(
+                "OVER-SEND GUARD: SENT + IN-FLIGHT <= TOTAL");
             WriteImportant(
                 "========================================");
 
             try
             {
-                // تا ساعت تعیین‌شده هیچ فرم یا POST سفارش ایجاد نمی‌شود.
-                TimeSpan waitUntilStart =
+                // PRE-WARM:
+                // فرم رسمی خرید کمی قبل از startAt آماده می‌شود.
+                // این مرحله فقط prepare است و هیچ کلیک ارسال انجام نمی‌دهد.
+                DateTimeOffset preWarmAt =
                     startAt -
+                    ScheduledOrderPreWarmLeadTime;
+
+                TimeSpan preWarmWait =
+                    preWarmAt -
                     DateTimeOffset.Now;
 
-                if (waitUntilStart >
+                if (preWarmWait >
                     TimeSpan.Zero)
                 {
-                    SetStatus(
-                        "زمان‌بندی فعال است؛ در انتظار ساعت شروع.");
+                    WriteImportant(
+                        "PRE-WARM WAIT UNTIL: " +
+                        preWarmAt.ToString(
+                            "HH:mm:ss.fff"));
 
                     await Task.Delay(
-                        waitUntilStart,
+                        preWarmWait,
                         cancellationSource.Token);
                 }
 
-                int attemptNumber =
-                    0;
+                cancellationSource.Token
+                    .ThrowIfCancellationRequested();
 
-                // هر دور دقیقاً یک تلاش مستقل است و فقط خطای قطعی اجازه دور بعد را می‌دهد.
-                while (DateTimeOffset.Now <
+                if (DateTimeOffset.Now <
+                    endAt)
+                {
+                    string preWarmNonce =
+                        Guid.NewGuid()
+                            .ToString(
+                                "N");
+
+                    try
+                    {
+                        DateTimeOffset preWarmStartedAt =
+                            DateTimeOffset.Now;
+
+                        OfficialOrderUiBridgeResult preWarmResult =
+                            await PrepareOfficialOrderFormAsync(
+                                coreWebView,
+                                order,
+                                preWarmNonce,
+                                cancellationSource.Token);
+
+                        DateTimeOffset preWarmCompletedAt =
+                            DateTimeOffset.Now;
+
+                        WriteImportant("");
+                        WriteImportant(
+                            "SCHEDULE PRE-WARM STATUS: " +
+                            preWarmResult.Status);
+                        WriteImportant(
+                            "SCHEDULE PRE-WARM DURATION MS: " +
+                            (preWarmCompletedAt -
+                                preWarmStartedAt)
+                                .TotalMilliseconds
+                                .ToString(
+                                    "F1",
+                                    System.Globalization.CultureInfo.InvariantCulture));
+
+                        if (!preWarmResult.HasStatus(
+                            OfficialOrderUiBridge.PreparedStatus))
+                        {
+                            WriteScheduledOrderStopped(
+                                "فرم رسمی خرید قبل از شروع زمان‌بندی آماده نشد.",
+                                "PRE-WARM FAILED BEFORE FIRST SLOT");
+
+                            return;
+                        }
+                    }
+                    finally
+                    {
+                        await TryClearOfficialPreparedStateAsync(
+                            coreWebView,
+                            preWarmNonce);
+                    }
+                }
+
+                DateTimeOffset nextSlot =
+                    startAt;
+
+                while (nextSlot <
                     endAt)
                 {
                     cancellationSource.Token
                         .ThrowIfCancellationRequested();
+
+                    TimeSpan wait =
+                        nextSlot -
+                        DateTimeOffset.Now;
+
+                    if (wait >
+                        TimeSpan.Zero)
+                    {
+                        await Task.Delay(
+                            wait,
+                            cancellationSource.Token);
+                    }
+
+                    cancellationSource.Token
+                        .ThrowIfCancellationRequested();
+
+                    DateTimeOffset slotStartedAt =
+                        DateTimeOffset.Now;
+
+                    if (slotStartedAt >=
+                        endAt)
+                    {
+                        break;
+                    }
 
                     if (!ReferenceEquals(
                         _confirmedOrderSnapshot,
@@ -1162,116 +1292,289 @@ namespace FastOrder
                     {
                         WriteScheduledOrderStopped(
                             "سفارش تأییدشده تغییر کرده است.",
-                            "STOPPED BEFORE POST");
+                            "STOPPED BEFORE NEXT SLOT");
 
-                        return;
+                        break;
                     }
 
-                    attemptNumber++;
+                    slotNumber++;
 
-                    WriteImportant("");
-                    WriteImportant(
-                        "SCHEDULED ORDER ATTEMPT: " +
-                        attemptNumber);
-                    WriteImportant(
-                        "TIME: " +
-                        DateTimeOffset.Now.ToString(
-                            "HH:mm:ss zzz"));
+                    long currentQuantity;
 
-                    ScheduledOrderAttemptOutcome outcome =
-                        await ExecuteScheduledOrderAttemptAsync(
-                            coreWebView,
-                            snapshot,
-                            order,
-                            endAt,
-                            cancellationSource.Token);
-
-                    // اولین پاسخ HTTP موفق، چرخه را بدون تلاش اضافه متوقف می‌کند.
-                    if (outcome ==
-                        ScheduledOrderAttemptOutcome.Succeeded)
+                    lock (accountingLock)
                     {
+                        long availableQuantity =
+                            totalQuantity -
+                            sentQuantity -
+                            inFlightQuantity;
+
+                        if (availableQuantity <= 0)
+                        {
+                            currentQuantity =
+                                0;
+                        }
+                        else
+                        {
+                            currentQuantity =
+                                Math.Min(
+                                    availableQuantity,
+                                    maxQuantityPerOrder);
+
+                            inFlightQuantity =
+                                checked(
+                                    inFlightQuantity +
+                                    currentQuantity);
+                        }
+                    }
+
+                    if (currentQuantity > 0)
+                    {
+                        int capturedSlotNumber =
+                            slotNumber;
+
+                        long capturedQuantity =
+                            currentQuantity;
+
+                        Order currentOrder =
+                            CreateScheduledSliceOrder(
+                                order,
+                                capturedQuantity);
+
                         WriteImportant("");
                         WriteImportant(
-                            "========================================");
+                            "CLOCK SLOT STARTED: " +
+                            capturedSlotNumber);
                         WriteImportant(
-                            "SCHEDULED ORDER COMPLETED");
+                            "TARGET: " +
+                            nextSlot.ToString(
+                                "HH:mm:ss.fff"));
                         WriteImportant(
-                            "========================================");
+                            "ACTUAL: " +
+                            slotStartedAt.ToString(
+                                "HH:mm:ss.fff"));
                         WriteImportant(
-                            "RESULT: FIRST HTTP SUCCESS OBSERVED");
-                        WriteImportant(
-                            "ATTEMPTS: " +
-                            attemptNumber);
-                        WriteImportant(
-                            "RETRY LOOP: STOPPED");
-                        WriteImportant(
-                            "BROKER OUTCOME: VERIFY IN EASYTRADER ORDER LIST");
-                        WriteImportant(
-                            "========================================");
+                            "RESERVED QUANTITY: " +
+                            capturedQuantity);
 
-                        SetStatus(
-                            "اولین پاسخ موفق سفارش مشاهده شد؛ تلاش‌های بعدی متوقف شدند.");
+                        Task dispatchTask =
+                            DispatchReservedSliceAsync(
+                                coreWebView,
+                                snapshot,
+                                currentOrder,
+                                capturedSlotNumber,
+                                capturedQuantity,
+                                accountingLock,
+                                CancellationToken.None,
+                                onClicked: quantity =>
+                                {
+                                    lock (accountingLock)
+                                    {
+                                        inFlightQuantity =
+                                            checked(
+                                                inFlightQuantity -
+                                                quantity);
 
-                        return;
+                                        sentQuantity =
+                                            checked(
+                                                sentQuantity +
+                                                quantity);
+
+                                        clickedOrderCount++;
+                                    }
+                                },
+                                onNotClicked: quantity =>
+                                {
+                                    lock (accountingLock)
+                                    {
+                                        inFlightQuantity =
+                                            checked(
+                                                inFlightQuantity -
+                                                quantity);
+                                    }
+                                });
+
+                        activeDispatchTasks.Add(
+                            dispatchTask);
                     }
-
-                    // Timeout، پاسخ‌های مبهم و خطاهای دارای احتمال ثبت سفارش
-                    // هرگز خودکار تکرار نمی‌شوند تا سفارش تکراری ساخته نشود.
-                    if (outcome ==
-                        ScheduledOrderAttemptOutcome.AmbiguousFailure)
+                    else
                     {
-                        WriteScheduledOrderStopped(
-                            "نتیجه تلاش آخر قطعی نیست؛ برای جلوگیری از سفارش تکراری ادامه متوقف شد.",
-                            "VERIFY MANUALLY IN EASYTRADER");
+                        long sentSnapshot;
+                        long inFlightSnapshot;
 
-                        return;
+                        lock (accountingLock)
+                        {
+                            sentSnapshot =
+                                sentQuantity;
+
+                            inFlightSnapshot =
+                                inFlightQuantity;
+                        }
+
+                        WriteImportant(
+                            "CLOCK SLOT " +
+                            slotNumber +
+                            ": NO FREE QUANTITY");
+                        WriteImportant(
+                            "SENT: " +
+                            sentSnapshot);
+                        WriteImportant(
+                            "IN-FLIGHT: " +
+                            inFlightSnapshot);
                     }
 
-                    cancellationSource.Token
-                        .ThrowIfCancellationRequested();
+                    bool allQuantityAccounted;
 
-                    TimeSpan remaining =
-                        endAt -
-                        DateTimeOffset.Now;
+                    lock (accountingLock)
+                    {
+                        allQuantityAccounted =
+                            sentQuantity >=
+                            totalQuantity;
+                    }
 
-                    if (remaining <=
-                        TimeSpan.Zero)
+                    if (allQuantityAccounted)
                     {
                         break;
                     }
 
-                    TimeSpan retryDelay =
-                        remaining < ScheduledOrderRetryDelay
-                            ? remaining
-                            : ScheduledOrderRetryDelay;
+                    nextSlot =
+                        nextSlot +
+                        ScheduledOrderRetryDelay;
 
-                    SetStatus(
-                        "تلاش قبلی خطای قطعی داشت؛ تلاش بعدی پس از وقفه انجام می‌شود.");
+                    // اگر event-loop دیر بیدار شد، slotهای گذشته burst نمی‌شوند.
+                    DateTimeOffset nowAfterScheduling =
+                        DateTimeOffset.Now;
 
-                    await Task.Delay(
-                        retryDelay,
-                        cancellationSource.Token);
+                    while (nextSlot <=
+                        nowAfterScheduling &&
+                        nextSlot <
+                        endAt)
+                    {
+                        nextSlot =
+                            nextSlot +
+                            ScheduledOrderRetryDelay;
+                    }
                 }
 
-                WriteScheduledOrderStopped(
-                    "بازه زمانی بدون دریافت پاسخ موفق پایان یافت.",
-                    "WINDOW ENDED WITHOUT SUCCESS");
+                if (activeDispatchTasks.Count > 0)
+                {
+                    WriteImportant(
+                        "CLOCK WINDOW CLOSED; WAITING FOR ACTIVE UI DISPATCH TASKS.");
+
+                    try
+                    {
+                        await Task.WhenAll(
+                            activeDispatchTasks);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                }
+
+                long finalSent;
+                long finalInFlight;
+
+                lock (accountingLock)
+                {
+                    finalSent =
+                        sentQuantity;
+
+                    finalInFlight =
+                        inFlightQuantity;
+                }
+
+                WriteImportant("");
+                WriteImportant(
+                    "========================================");
+                WriteImportant(
+                    "NON-BLOCKING CLOCK SPLIT ORDER FINISHED");
+                WriteImportant(
+                    "========================================");
+                WriteImportant(
+                    "TOTAL QUANTITY: " +
+                    totalQuantity);
+                WriteImportant(
+                    "SENT QUANTITY: " +
+                    finalSent);
+                WriteImportant(
+                    "IN-FLIGHT QUANTITY: " +
+                    finalInFlight);
+                WriteImportant(
+                    "UNSENT QUANTITY: " +
+                    (totalQuantity -
+                        finalSent -
+                        finalInFlight));
+                WriteImportant(
+                    "CLICKED ORDER COUNT: " +
+                    clickedOrderCount);
+                WriteImportant(
+                    "BROKER OUTCOME: VERIFY IN EASYTRADER ORDER LIST");
+                WriteImportant(
+                    "========================================");
+
+                SetStatus(
+                    finalSent == totalQuantity
+                        ? "کل حجم از طریق کلیک رسمی ارسال شد؛ نتیجه سفارش‌ها را در EasyTrader بررسی کنید."
+                        : "بازه ارسال پایان یافت؛ بخشی از حجم ارسال نشد.");
             }
             catch (OperationCanceledException)
             {
+                // لغو فقط از ایجاد slot جدید جلوگیری می‌کند.
+                // dispatchهایی که قبلاً شروع شده‌اند باید تا نتیجه UI
+                // ادامه پیدا کنند تا رزرو حجم اشتباه آزاد نشود.
+                if (activeDispatchTasks.Count > 0)
+                {
+                    WriteImportant(
+                        "CANCEL REQUESTED; WAITING FOR ALREADY-LAUNCHED UI DISPATCH TASKS.");
+
+                    try
+                    {
+                        await Task.WhenAll(
+                            activeDispatchTasks);
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteImportant(
+                            "ACTIVE DISPATCH SETTLE ERROR AFTER CANCEL: " +
+                            ex.Message);
+                    }
+                }
+
+                long canceledSent;
+                long canceledInFlight;
+
+                lock (accountingLock)
+                {
+                    canceledSent =
+                        sentQuantity;
+
+                    canceledInFlight =
+                        inFlightQuantity;
+                }
+
+                WriteImportant(
+                    "CANCEL FINAL SENT QUANTITY: " +
+                    canceledSent);
+                WriteImportant(
+                    "CANCEL FINAL IN-FLIGHT QUANTITY: " +
+                    canceledInFlight);
+
                 WriteScheduledOrderStopped(
-                    "زمان‌بندی توسط کاربر لغو شد.",
+                    "زمان‌بندی توسط کاربر لغو شد؛ slot جدید ایجاد نشد و dispatchهای قبلاً شروع‌شده تعیین تکلیف شدند.",
                     "CANCELED BY USER");
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                WriteImportant(
+                    "NON-BLOCKING CLOCK ERROR: " +
+                    ex.Message);
+
                 WriteScheduledOrderStopped(
-                    "خطای داخلی رخ داد و عملیات برای جلوگیری از ارسال تکراری متوقف شد.",
+                    "خطای داخلی رخ داد و slotهای جدید متوقف شدند.",
                     "STOPPED ON INTERNAL ERROR");
             }
             finally
             {
-                // این پاک‌سازی در تمام مسیرهای موفق، خطا، لغو و انقضای بازه اجرا می‌شود.
                 ResetLiveSubmissionTracking();
 
                 if (ReferenceEquals(
@@ -1292,10 +1595,233 @@ namespace FastOrder
             }
         }
 
-        /// <summary>
-        /// یک تلاش کامل را انجام می‌دهد: آماده‌سازی فرم رسمی، کنترل نهایی
-        /// Snapshot، یک کلیک رسمی و انتظار برای پاسخ شبکه مرتبط.
-        /// </summary>
+        private async Task DispatchReservedSliceAsync(
+            CoreWebView2 coreWebView,
+            ConfirmedOrderSnapshot snapshot,
+            Order order,
+            int slotNumber,
+            long reservedQuantity,
+            object accountingLock,
+            CancellationToken cancellationToken,
+            Action<long> onClicked,
+            Action<long> onNotClicked)
+        {
+            OfficialOrderUiBridgeResult result;
+
+            try
+            {
+                result =
+                    await ExecuteClockDrivenSliceAttemptAsync(
+                        coreWebView,
+                        snapshot,
+                        order,
+                        slotNumber,
+                        cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // مسیر scheduler برای dispatch شروع‌شده CancellationToken.None
+                // می‌فرستد؛ این شاخه فقط برای callers احتمالی دیگر باقی می‌ماند.
+                onNotClicked(
+                    reservedQuantity);
+
+                throw;
+            }
+            catch (Exception ex)
+            {
+                onNotClicked(
+                    reservedQuantity);
+
+                WriteImportant(
+                    "CLOCK SLOT " +
+                    slotNumber +
+                    " DISPATCH ERROR: " +
+                    ex.Message);
+
+                return;
+            }
+
+            if (result.HasStatus(
+                OfficialOrderUiBridge.ClickedStatus))
+            {
+                onClicked(
+                    reservedQuantity);
+
+                WriteImportant(
+                    "CLOCK SLOT " +
+                    slotNumber +
+                    ": CLICKED; QUANTITY COMMITTED AS SENT: " +
+                    reservedQuantity);
+
+                return;
+            }
+
+            onNotClicked(
+                reservedQuantity);
+
+            WriteImportant(
+                "CLOCK SLOT " +
+                slotNumber +
+                ": NOT CLICKED; RESERVATION RELEASED: " +
+                reservedQuantity);
+
+            WriteImportant(
+                "STATUS: " +
+                result.Status);
+        }
+
+        private static Order CreateScheduledSliceOrder(
+            Order source,
+            long quantity)
+        {
+            if (quantity <= 0 ||
+                quantity > source.Quantity)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(quantity));
+            }
+
+            long grossValue =
+                checked(
+                    source.Price *
+                    quantity);
+
+            decimal commissionAmountDecimal =
+                decimal.Round(
+                    grossValue *
+                    (decimal)source.Commission,
+                    0,
+                    MidpointRounding.AwayFromZero);
+
+            long commissionAmount =
+                decimal.ToInt64(
+                    commissionAmountDecimal);
+
+            long totalValue =
+                checked(
+                    grossValue +
+                    commissionAmount);
+
+            return new Order
+            {
+                Commission =
+                    source.Commission,
+
+                CreateDateTime =
+                    DateTime.Now.ToString(
+                        "M/d/yyyy, h:mm:ss tt",
+                        System.Globalization.CultureInfo.InvariantCulture),
+
+                OrderFrom =
+                    source.OrderFrom,
+
+                OrderModelType =
+                    source.OrderModelType,
+
+                Price =
+                    source.Price,
+
+                Quantity =
+                    quantity,
+
+                Side =
+                    source.Side,
+
+                SymbolIsin =
+                    source.SymbolIsin,
+
+                SymbolName =
+                    source.SymbolName,
+
+                TotalValue =
+                    totalValue,
+
+                ValidityType =
+                    source.ValidityType
+            };
+        }
+
+        private async Task<OfficialOrderUiBridgeResult>
+            ExecuteClockDrivenSliceAttemptAsync(
+                CoreWebView2 coreWebView,
+                ConfirmedOrderSnapshot snapshot,
+                Order order,
+                int slotNumber,
+                CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!ReferenceEquals(
+                _confirmedOrderSnapshot,
+                snapshot) ||
+                !snapshot.HasValidFingerprint())
+            {
+                return new OfficialOrderUiBridgeResult
+                {
+                    Status =
+                        "CONFIRMED_ORDER_CHANGED",
+
+                    Reason =
+                        "Confirmed order changed before scheduled slot."
+                };
+            }
+
+            string nonce =
+                Guid.NewGuid()
+                    .ToString(
+                        "N");
+
+            try
+            {
+                string resultJson =
+                    await coreWebView.ExecuteScriptAsync(
+                        OfficialOrderUiBridge
+                            .BuildAtomicScheduledSubmitScript(
+                                order,
+                                nonce));
+
+                // بعد از ExecuteScriptAsync دیگر cancellation بررسی نمی‌شود.
+                // چون JavaScript ممکن است کلیک رسمی را انجام داده باشد و
+                // نتیجه باید حتماً برای حسابداری sent/in-flight پردازش شود.
+                OfficialOrderUiBridgeResult result =
+                    OfficialOrderUiBridge.ParseResult(
+                        resultJson);
+
+                WriteImportant(
+                    "ATOMIC UI SLOT " +
+                    slotNumber +
+                    ": " +
+                    result.Status);
+
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                WriteImportant(
+                    "ATOMIC UI SLOT ERROR: " +
+                    ex.Message);
+
+                return new OfficialOrderUiBridgeResult
+                {
+                    Status =
+                        "ATOMIC_UI_ERROR",
+
+                    Reason =
+                        "Atomic scheduled UI action failed before a confirmed click."
+                };
+            }
+            finally
+            {
+                await TryClearOfficialPreparedStateAsync(
+                    coreWebView,
+                    nonce);
+            }
+        }
+
         private async Task<ScheduledOrderAttemptOutcome>
             ExecuteScheduledOrderAttemptAsync(
                 CoreWebView2 coreWebView,
@@ -2037,6 +2563,580 @@ namespace FastOrder
             return
                 uri.GetLeftPart(
                     UriPartial.Path);
+        }
+
+        // =====================================================
+        // SAFE WEBVIEW2 TIMING PROBE
+        // =====================================================
+
+        /// <summary>
+        /// تست فقط زمان‌بندی ExecuteScriptAsync را اندازه‌گیری می‌کند.
+        /// هیچ کلیک، تغییر فرم، درخواست شبکه یا دسترسی به اطلاعات احراز هویت ندارد.
+        /// </summary>
+        private async void WebViewTimingTestButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (_webViewTimingTestActive)
+            {
+                SetStatus(
+                    "تست زمان‌بندی WebView2 از قبل در حال اجرا است.");
+
+                return;
+            }
+
+            if (_scheduledOrderActive ||
+                _liveSubmissionInProgress)
+            {
+                SetStatus(
+                    "در زمان ارسال واقعی سفارش، تست زمان‌بندی اجرا نمی‌شود.");
+
+                return;
+            }
+
+            CoreWebView2? coreWebView =
+                Browser.CoreWebView2;
+
+            if (!_webViewReady ||
+                coreWebView == null)
+            {
+                SetStatus(
+                    "WebView2 هنوز آماده نیست.");
+
+                return;
+            }
+
+            const int probeCount =
+                10;
+
+            TimeSpan probeInterval =
+                TimeSpan.FromSeconds(
+                    1);
+
+            _webViewTimingTestActive =
+                true;
+
+            WebViewTimingTestButton.IsEnabled =
+                false;
+
+            WriteImportant("");
+            WriteImportant(
+                "========================================");
+            WriteImportant(
+                "SAFE WEBVIEW2 TIMING TEST");
+            WriteImportant(
+                "========================================");
+            WriteImportant(
+                "PROBES: 10");
+            WriteImportant(
+                "TARGET INTERVAL: 1000 ms");
+            WriteImportant(
+                "ORDER CLICK: NO");
+            WriteImportant(
+                "FORM CHANGE: NO");
+            WriteImportant(
+                "NETWORK REQUEST CREATED BY TEST: NO");
+            WriteImportant(
+                "TOKEN/COOKIE ACCESS: NO");
+            WriteImportant(
+                "========================================");
+
+            try
+            {
+                DateTimeOffset testStart =
+                    DateTimeOffset.Now;
+
+                System.Collections.Generic.List<Task>
+                    probeTasks =
+                        new System.Collections.Generic.List<Task>();
+
+                for (int index = 0;
+                    index < probeCount;
+                    index++)
+                {
+                    DateTimeOffset targetTime =
+                        testStart +
+                        TimeSpan.FromTicks(
+                            probeInterval.Ticks *
+                            index);
+
+                    TimeSpan wait =
+                        targetTime -
+                        DateTimeOffset.Now;
+
+                    if (wait >
+                        TimeSpan.Zero)
+                    {
+                        await Task.Delay(
+                            wait);
+                    }
+
+                    DateTimeOffset requestTime =
+                        DateTimeOffset.Now;
+
+                    Task probeTask =
+                        RunWebViewTimingProbeAsync(
+                            coreWebView,
+                            index + 1,
+                            testStart,
+                            targetTime,
+                            requestTime);
+
+                    probeTasks.Add(
+                        probeTask);
+                }
+
+                await Task.WhenAll(
+                    probeTasks);
+
+                WriteImportant("");
+                WriteImportant(
+                    "========================================");
+                WriteImportant(
+                    "SAFE WEBVIEW2 TIMING TEST FINISHED");
+                WriteImportant(
+                    "========================================");
+                WriteImportant(
+                    "No order action was invoked by this test.");
+                WriteImportant(
+                    "========================================");
+
+                SetStatus(
+                    "تست زمان‌بندی تمام شد؛ خروجی Important API را ارسال کنید.");
+            }
+            catch (Exception ex)
+            {
+                WriteImportant(
+                    "WEBVIEW TIMING TEST ERROR: " +
+                    ex.Message);
+
+                SetStatus(
+                    "تست زمان‌بندی WebView2 با خطا متوقف شد.");
+            }
+            finally
+            {
+                _webViewTimingTestActive =
+                    false;
+
+                WebViewTimingTestButton.IsEnabled =
+                    true;
+            }
+        }
+
+        private async Task RunWebViewTimingProbeAsync(
+            CoreWebView2 coreWebView,
+            int probeNumber,
+            DateTimeOffset testStart,
+            DateTimeOffset targetTime,
+            DateTimeOffset requestTime)
+        {
+            const string harmlessScript =
+                "(() => ({ dateNow: Date.now(), " +
+                "performanceNow: performance.now(), " +
+                "readyState: document.readyState, " +
+                "origin: window.location.origin }))()";
+
+            DateTimeOffset callStartedAt =
+                DateTimeOffset.Now;
+
+            string resultJson =
+                await coreWebView.ExecuteScriptAsync(
+                    harmlessScript);
+
+            DateTimeOffset completedAt =
+                DateTimeOffset.Now;
+
+            double targetOffsetMs =
+                (targetTime - testStart)
+                    .TotalMilliseconds;
+
+            double requestOffsetMs =
+                (requestTime - testStart)
+                    .TotalMilliseconds;
+
+            double callStartOffsetMs =
+                (callStartedAt - testStart)
+                    .TotalMilliseconds;
+
+            double completedOffsetMs =
+                (completedAt - testStart)
+                    .TotalMilliseconds;
+
+            double requestJitterMs =
+                (requestTime - targetTime)
+                    .TotalMilliseconds;
+
+            double executeDurationMs =
+                (completedAt - callStartedAt)
+                    .TotalMilliseconds;
+
+            WriteImportant("");
+            WriteImportant(
+                "WEBVIEW TIMING PROBE #" +
+                probeNumber);
+            WriteImportant(
+                "TARGET OFFSET MS: " +
+                targetOffsetMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "REQUEST OFFSET MS: " +
+                requestOffsetMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "CALL START OFFSET MS: " +
+                callStartOffsetMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "COMPLETE OFFSET MS: " +
+                completedOffsetMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "REQUEST JITTER MS: " +
+                requestJitterMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "EXECUTE DURATION MS: " +
+                executeDurationMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "JS RESULT: " +
+                resultJson);
+        }
+
+        // =====================================================
+        // EASYTRADER PREPARE-ONLY DRY-RUN TIMING PROBE
+        // =====================================================
+
+        /// <summary>
+        /// مسیر واقعی پیدا کردن فرم و مقداردهی قیمت/تعداد را اندازه‌گیری می‌کند،
+        /// اما BuildSubmitScript یا کلیک «ارسال خرید» را هرگز فراخوانی نمی‌کند.
+        /// </summary>
+        private async void OrderUiDryRunTimingButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (_orderUiDryRunTimingActive)
+            {
+                SetStatus(
+                    "Dry-Run فرم سفارش از قبل در حال اجرا است.");
+
+                return;
+            }
+
+            if (_scheduledOrderActive ||
+                _liveSubmissionInProgress ||
+                _webViewTimingTestActive)
+            {
+                SetStatus(
+                    "در زمان ارسال واقعی یا تست دیگر، Dry-Run اجرا نمی‌شود.");
+
+                return;
+            }
+
+            CoreWebView2? coreWebView =
+                Browser.CoreWebView2;
+
+            if (!_webViewReady ||
+                coreWebView == null)
+            {
+                SetStatus(
+                    "WebView2 هنوز آماده نیست.");
+
+                return;
+            }
+
+            if (!Uri.TryCreate(
+                coreWebView.Source,
+                UriKind.Absolute,
+                out Uri? activeUri) ||
+                !activeUri.Host.Equals(
+                    "d.easytrader.ir",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                SetStatus(
+                    "برای Dry-Run باید صفحه اصلی EasyTrader فعال باشد.");
+
+                return;
+            }
+
+            if (!TryGetValidatedConfirmedOrder(
+                out ConfirmedOrderSnapshot? snapshot,
+                out CreateOrderPayload? payload,
+                out string validationError) ||
+                snapshot == null ||
+                payload?.Order == null)
+            {
+                WriteImportant(
+                    "DRY-RUN BLOCKED: " +
+                    validationError);
+
+                SetStatus(
+                    "ابتدا سفارش را فقط به صورت محلی بررسی و تأیید کنید.");
+
+                return;
+            }
+
+            Order order =
+                payload.Order;
+
+            const int probeCount =
+                10;
+
+            TimeSpan probeInterval =
+                TimeSpan.FromSeconds(
+                    1);
+
+            _orderUiDryRunTimingActive =
+                true;
+
+            OrderUiDryRunTimingButton.IsEnabled =
+                false;
+
+            WriteImportant("");
+            WriteImportant(
+                "========================================");
+            WriteImportant(
+                "EASYTRADER PREPARE-ONLY DRY-RUN");
+            WriteImportant(
+                "========================================");
+            WriteImportant(
+                "PROBES: 10");
+            WriteImportant(
+                "TARGET INTERVAL: 1000 ms");
+            WriteImportant(
+                "FORM FIND + VALUE SET: YES");
+            WriteImportant(
+                "FINAL SUBMIT CLICK: NO");
+            WriteImportant(
+                "ORDER POST CREATED BY DRY-RUN: NO");
+            WriteImportant(
+                "DIRECT API CREDENTIALS: NOT ACCESSED");
+            WriteImportant(
+                "========================================");
+
+            string setupNonce =
+                Guid.NewGuid()
+                    .ToString(
+                        "N");
+
+            try
+            {
+                DateTimeOffset setupStartedAt =
+                    DateTimeOffset.Now;
+
+                OfficialOrderUiBridgeResult setupResult =
+                    await PrepareOfficialOrderFormAsync(
+                        coreWebView,
+                        order,
+                        setupNonce);
+
+                DateTimeOffset setupCompletedAt =
+                    DateTimeOffset.Now;
+
+                await TryClearOfficialPreparedStateAsync(
+                    coreWebView,
+                    setupNonce);
+
+                WriteImportant(
+                    "DRY-RUN SETUP STATUS: " +
+                    setupResult.Status);
+                WriteImportant(
+                    "DRY-RUN SETUP DURATION MS: " +
+                    (setupCompletedAt - setupStartedAt)
+                        .TotalMilliseconds
+                        .ToString(
+                            "F1",
+                            System.Globalization.CultureInfo.InvariantCulture));
+
+                if (!setupResult.HasStatus(
+                    OfficialOrderUiBridge.PreparedStatus))
+                {
+                    SetStatus(
+                        "فرم رسمی برای Dry-Run آماده نشد.");
+
+                    return;
+                }
+
+                DateTimeOffset testStart =
+                    DateTimeOffset.Now;
+
+                System.Collections.Generic.List<Task>
+                    probeTasks =
+                        new System.Collections.Generic.List<Task>();
+
+                for (int index = 0;
+                    index < probeCount;
+                    index++)
+                {
+                    DateTimeOffset targetTime =
+                        testStart +
+                        TimeSpan.FromTicks(
+                            probeInterval.Ticks *
+                            index);
+
+                    TimeSpan wait =
+                        targetTime -
+                        DateTimeOffset.Now;
+
+                    if (wait >
+                        TimeSpan.Zero)
+                    {
+                        await Task.Delay(
+                            wait);
+                    }
+
+                    DateTimeOffset requestTime =
+                        DateTimeOffset.Now;
+
+                    string nonce =
+                        Guid.NewGuid()
+                            .ToString(
+                                "N");
+
+                    Task probeTask =
+                        RunOrderUiPrepareDryProbeAsync(
+                            coreWebView,
+                            order,
+                            nonce,
+                            index + 1,
+                            testStart,
+                            targetTime,
+                            requestTime);
+
+                    probeTasks.Add(
+                        probeTask);
+                }
+
+                await Task.WhenAll(
+                    probeTasks);
+
+                WriteImportant("");
+                WriteImportant(
+                    "========================================");
+                WriteImportant(
+                    "EASYTRADER PREPARE-ONLY DRY-RUN FINISHED");
+                WriteImportant(
+                    "========================================");
+                WriteImportant(
+                    "FINAL SUBMIT CLICK: NO");
+                WriteImportant(
+                    "ORDER POST CREATED BY DRY-RUN: NO");
+                WriteImportant(
+                    "========================================");
+
+                SetStatus(
+                    "Dry-Run تمام شد؛ خروجی Important API را ارسال کنید.");
+            }
+            catch (Exception ex)
+            {
+                WriteImportant(
+                    "ORDER UI DRY-RUN ERROR: " +
+                    ex.Message);
+
+                SetStatus(
+                    "Dry-Run فرم سفارش با خطا متوقف شد.");
+            }
+            finally
+            {
+                await TryClearOfficialPreparedStateAsync(
+                    coreWebView,
+                    setupNonce);
+
+                _orderUiDryRunTimingActive =
+                    false;
+
+                OrderUiDryRunTimingButton.IsEnabled =
+                    true;
+            }
+        }
+
+        private async Task RunOrderUiPrepareDryProbeAsync(
+            CoreWebView2 coreWebView,
+            Order order,
+            string nonce,
+            int probeNumber,
+            DateTimeOffset testStart,
+            DateTimeOffset targetTime,
+            DateTimeOffset requestTime)
+        {
+            DateTimeOffset callStartedAt =
+                DateTimeOffset.Now;
+
+            string resultJson =
+                await coreWebView.ExecuteScriptAsync(
+                    OfficialOrderUiBridge.BuildPrepareScript(
+                        order,
+                        nonce));
+
+            DateTimeOffset completedAt =
+                DateTimeOffset.Now;
+
+            OfficialOrderUiBridgeResult result =
+                OfficialOrderUiBridge.ParseResult(
+                    resultJson);
+
+            await TryClearOfficialPreparedStateAsync(
+                coreWebView,
+                nonce);
+
+            double targetOffsetMs =
+                (targetTime - testStart)
+                    .TotalMilliseconds;
+
+            double requestOffsetMs =
+                (requestTime - testStart)
+                    .TotalMilliseconds;
+
+            double completeOffsetMs =
+                (completedAt - testStart)
+                    .TotalMilliseconds;
+
+            double requestJitterMs =
+                (requestTime - targetTime)
+                    .TotalMilliseconds;
+
+            double executeDurationMs =
+                (completedAt - callStartedAt)
+                    .TotalMilliseconds;
+
+            WriteImportant("");
+            WriteImportant(
+                "ORDER UI DRY PROBE #" +
+                probeNumber);
+            WriteImportant(
+                "STATUS: " +
+                result.Status);
+            WriteImportant(
+                "TARGET OFFSET MS: " +
+                targetOffsetMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "REQUEST OFFSET MS: " +
+                requestOffsetMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "COMPLETE OFFSET MS: " +
+                completeOffsetMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "REQUEST JITTER MS: " +
+                requestJitterMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            WriteImportant(
+                "EXECUTE DURATION MS: " +
+                executeDurationMs.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture));
         }
 
         // =====================================================

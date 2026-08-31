@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="تأیید ارسال واقعی سفارش"
         Width="620"
-        Height="690"
+        Height="735"
         MinWidth="560"
-        MinHeight="650"
+        MinHeight="695"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
@@ -34,7 +34,7 @@
                 CornerRadius="5"
                 Padding="14"
                 Margin="0,0,0,18">
-            <TextBlock Text="هشدار: پس از تأیید، برنامه در بازه تعیین‌شده برای ثبت همین سفارش تلاش می‌کند و با اولین پاسخ موفق متوقف می‌شود. پاسخ نامشخص هرگز تکرار نمی‌شود."
+            <TextBlock Text="هشدار: حجم کل به چند سفارش با سقف تعیین‌شده تقسیم می‌شود. برنامه در slotهای یک‌ثانیه‌ای بدون انتظار برای پاسخ HTTP قبلی تلاش می‌کند بخش بعدی را ارسال کند. حجم فقط پس از کلیک رسمی ارسال، ارسال‌شده محسوب می‌شود و پس از آن retry خودکار انجام نمی‌شود."
                        TextWrapping="Wrap"
                        FontWeight="Bold"
                        Foreground="#FF8E0000"/>
@@ -69,7 +69,7 @@
             <TextBlock Grid.Row="3" Grid.Column="0" Text="قیمت:" FontWeight="SemiBold" Margin="0,5"/>
             <TextBlock x:Name="PriceTextBlock" Grid.Row="3" Grid.Column="1" Margin="0,5"/>
 
-            <TextBlock Grid.Row="4" Grid.Column="0" Text="تعداد:" FontWeight="SemiBold" Margin="0,5"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="تعداد کل:" FontWeight="SemiBold" Margin="0,5"/>
             <TextBlock x:Name="QuantityTextBlock" Grid.Row="4" Grid.Column="1" Margin="0,5"/>
 
             <TextBlock Grid.Row="5" Grid.Column="0" Text="ارزش ناخالص:" FontWeight="SemiBold" Margin="0,5"/>
@@ -99,6 +99,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0"
@@ -125,9 +126,34 @@
                          TextAlignment="Center"
                          AutomationProperties.Name="ساعت پایان ارسال"/>
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="5"
-                           Text="قالب ساعت: HH:mm یا HH:mm:ss — بازه باید در همین روز و حداکثر ۸ ساعت باشد. اگر شروع گذشته باشد، عملیات فوراً آغاز می‌شود."
-                           Margin="0,8,0,0"
+                <TextBlock Grid.Row="1" Grid.Column="0"
+                           Text="سقف هر سفارش:"
+                           Margin="0,10,0,0"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"/>
+                <TextBox x:Name="MaxQuantityPerOrderTextBox"
+                         Grid.Row="1" Grid.Column="1"
+                         Height="32"
+                         Margin="0,10,0,0"
+                         VerticalContentAlignment="Center"
+                         FlowDirection="LeftToRight"
+                         TextAlignment="Center"
+                         AutomationProperties.Name="حداکثر حجم هر سفارش"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="3"
+                           Text="فاصله ارسال:"
+                           Margin="0,10,0,0"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="1" Grid.Column="4"
+                           Text="۱ ثانیه"
+                           Margin="0,10,0,0"
+                           VerticalAlignment="Center"
+                           FontWeight="Bold"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="5"
+                           Text="قالب ساعت: HH:mm یا HH:mm:ss — سقف هر سفارش باید عدد مثبت و حداکثر برابر حجم کل باشد. پاسخ مبهم چرخه را متوقف می‌کند."
+                           Margin="0,9,0,0"
                            Foreground="#FF555555"
                            TextWrapping="Wrap"/>
             </Grid>
@@ -135,7 +161,7 @@
 
         <CheckBox x:Name="FinalConfirmationCheckBox"
                   Grid.Row="4"
-                  Content="اطلاعات و بازه زمانی را بررسی کردم و تلاش خودکار برای ثبت همین یک سفارش را تأیید می‌کنم."
+                  Content="اطلاعات، حجم کل، سقف هر سفارش و بازه زمانی را بررسی کردم و ارسال پله‌ای سفارش‌ها را تأیید می‌کنم."
                   Margin="0,0,0,18"
                   FontWeight="SemiBold"
                   Checked="FinalConfirmationCheckBox_Changed"
@@ -153,7 +179,7 @@
                     IsCancel="True"/>
 
             <Button x:Name="SubmitButton"
-                    Content="تأیید و شروع زمان‌بندی"
+                    Content="تأیید و شروع ارسال پله‌ای"
                     Width="210"
                     Height="40"
                     IsEnabled="False"

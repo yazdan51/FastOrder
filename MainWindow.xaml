@@ -89,6 +89,22 @@
                     ToolTip="تلاش‌های بعدی را لغو می‌کند؛ عملیات ارسال‌شده قابل بازگردانی نیست."
                     Click="CancelScheduledOrderButton_Click"/>
 
+            <Button x:Name="WebViewTimingTestButton"
+                    Content="تست زمان‌بندی WebView2"
+                    Width="180"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    ToolTip="فقط زمان اجرای JavaScript را اندازه‌گیری می‌کند؛ هیچ کلیک، POST یا تغییر فرم انجام نمی‌شود."
+                    Click="WebViewTimingTestButton_Click"/>
+
+            <Button x:Name="OrderUiDryRunTimingButton"
+                    Content="Dry-Run فرم سفارش"
+                    Width="165"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    ToolTip="فرم رسمی را پیدا و قیمت/تعداد تأییدشده را تنظیم می‌کند، اما دکمه ارسال خرید را هرگز کلیک نمی‌کند."
+                    Click="OrderUiDryRunTimingButton_Click"/>
+
             <Button x:Name="PauseButton"
                     Content="Pause Log"
                     Width="110"

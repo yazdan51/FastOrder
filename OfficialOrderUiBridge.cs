@@ -747,6 +747,63 @@ namespace FastOrder
         }
 
         /// <summary>
+        /// برای زمان‌بندی سریع، آماده‌سازی و کلیک نهایی را در یک اجرای اتمیک
+        /// JavaScript انجام می‌دهد. اگر پنجره سفارش هنوز باز نباشد، فقط درخواست
+        /// بازشدن پنجره را صادر می‌کند و هیچ POST سفارشی ایجاد نمی‌شود.
+        /// </summary>
+        public static string BuildAtomicScheduledSubmitScript(
+            Order order,
+            string nonce)
+        {
+            ArgumentNullException.ThrowIfNull(
+                order);
+
+            if (string.IsNullOrWhiteSpace(
+                nonce))
+            {
+                throw new ArgumentException(
+                    "Submission nonce cannot be empty.",
+                    nameof(nonce));
+            }
+
+            string prepareScript =
+                BuildPrepareScript(
+                    order,
+                    nonce);
+
+            string ensureDialogScript =
+                BuildEnsureBuyDialogScript(
+                    order);
+
+            string submitScript =
+                BuildSubmitScript(
+                    order,
+                    nonce);
+
+            return $$"""
+                (() => {
+                    const prepareResult =
+                        {{prepareScript}};
+
+                    if (prepareResult &&
+                        prepareResult.status === "PREPARED") {
+                        return {{submitScript}};
+                    }
+
+                    if (prepareResult &&
+                        prepareResult.status === "ORDER_DIALOG_NOT_FOUND") {
+                        return {{ensureDialogScript}};
+                    }
+
+                    return prepareResult || {
+                        status: "INVALID_RESULT",
+                        reason: "Atomic scheduled submission returned no result."
+                    };
+                })()
+                """;
+        }
+
+        /// <summary>
         /// وضعیت موقت آماده‌سازی را فقط در صورت تطبیق Nonce پاک می‌کند.
         /// این پاک‌سازی به Session، Cookie، Token یا داده‌های EasyTrader دست نمی‌زند.
         /// </summary>
