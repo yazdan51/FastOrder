@@ -21,6 +21,7 @@ commit that contains the implementation.
 | --- | --- | --- | --- |
 | 74 — Responsive UI shell | Completed | 2026-09-01 | `4c670098d6e204510f5488b96df4b01a259798b2` |
 | 75 — Session model + session list UI | Completed | 2026-09-01 | `b5cfd60ecc580a9069f89a931b6ae77a5ab3e776` |
+| 75.1 — Exchange-synchronized scheduler clock | Completed | 2026-09-01 | `35d004d4b777ddb3c2fa48f81293e822c5e155d0` |
 | 76 — Move confirmation ownership into sessions | Not started | — | — |
 | 77 — Central Official UI Dispatcher | Not started | — | — |
 | 78 — Global next-due priority queue | Not started | — | — |
@@ -116,6 +117,70 @@ commit that contains the implementation.
 - A startup smoke check confirmed that the WPF window became visible at `1280x720` and that the
   WebView initialized.
 - Temporary diagnostic output used for the smoke check was removed before the commit.
+
+## Stage 75.1 — Exchange-synchronized scheduler clock
+
+**Status:** Completed on 2026-09-01
+
+**Commit:** `35d004d4b777ddb3c2fa48f81293e822c5e155d0` (`Use exchange clock for scheduled order timing`)
+
+### Delivered changes
+
+- Added `ExchangeClock`, synchronized read-only through the public HTTPS TSETMC market-overview
+  endpoint at `cdn.tsetmc.com` without authentication or broker-session data.
+- Derived the exchange clock from the TSETMC HTTP `Date` response header and converted it to the
+  Tehran time zone.
+- Used three initial samples and selected the sample with the lowest round-trip time before final
+  confirmation and again immediately after confirmation.
+- Advanced a successful sample with `Stopwatch` so Windows wall-clock changes cannot shift an
+  armed schedule.
+- Added a visible TSETMC clock and `SYNC`/`STALE` state to the main-window header.
+- Added the synchronized exchange time and source to the final confirmation window.
+- Built the entered start and end timestamps from the TSETMC calendar date and Tehran offset,
+  rather than `DateTime.Today` or `DateTimeOffset.Now`.
+- Routed pre-warm waiting, slot start, missed-slot skipping, and end-window checks through the
+  exchange clock.
+- Refreshed the exchange clock every three seconds while a real schedule is active.
+- Made scheduling fail closed: if no valid sample exists or the last valid sample is older than
+  ten seconds, no new slot is created.
+- Preserved already-launched dispatch settlement after a clock failure so `sent`/`in-flight`
+  accounting remains consistent.
+
+### Changed files
+
+- `ExchangeClock.cs` (new)
+- `MainWindow.xaml`
+- `MainWindow.xaml.cs`
+- `LiveOrderConfirmationWindow.xaml`
+- `LiveOrderConfirmationWindow.xaml.cs`
+
+### Preserved behavior and non-goals
+
+- The one-second slot cadence and missed-slot no-burst rule remain unchanged.
+- Prime Until Ready behavior remains unchanged.
+- Existing `sent` and `in-flight` accounting remains authoritative.
+- The final submit still uses the official EasyTrader UI click path.
+- No token, cookie, authorization value, private request body, or direct broker API order path was
+  introduced.
+- The source is the public TSETMC HTTPS server clock, not a private matching-engine clock or an
+  undocumented authenticated broker endpoint.
+- The HTTP `Date` header has one-second resolution. Estimated uncertainty is recorded as 500ms
+  plus half of the measured round-trip time; the implementation does not claim millisecond-level
+  exchange-core precision.
+
+### Verification
+
+- Debug build passed with zero compilation errors.
+- Release build passed with zero compilation errors.
+- The only normal build warning was `NU1900`, caused by the unavailable NuGet vulnerability feed.
+- A live read-only TSETMC request returned HTTP `200`, a valid `Date` header, and a valid
+  `marketOverview` object.
+- Debug startup smoke test displayed the synchronized clock with a measured RTT of approximately
+  `52ms`.
+- Release startup smoke test displayed the synchronized clock with a measured RTT of approximately
+  `7ms`.
+- Both smoke tests stopped at the EasyTrader login page; no credentials were entered, no order
+  form was changed, and no order was submitted.
 
 ## Stage 76 — Move confirmation ownership into sessions
 

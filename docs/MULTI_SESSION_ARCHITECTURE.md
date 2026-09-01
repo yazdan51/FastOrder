@@ -60,6 +60,9 @@ No direct credentials, tokens, cookies, authorization values, or custom direct o
 The following behavior is considered stable and must not be weakened:
 
 - one-second clock slots;
+- scheduled start, pre-warm, slot, and end-window decisions use a fresh exchange clock synchronized
+  from the public HTTPS TSETMC market server, not the Windows wall clock;
+- scheduling fails closed when the exchange clock is unavailable or stale;
 - no burst catch-up for missed slots;
 - no waiting for previous HTTP response before creating the next slot;
 - no waiting for previous UI dispatch before creating the next slot;
@@ -550,7 +553,7 @@ Session observed: Valid / Unknown
 UI Dispatcher: Idle / Busy
 Active sessions: N
 Next due: SYMBOL @ TIME
-Current clock: HH:mm:ss.fff
+Exchange clock (TSETMC): HH:mm:ss.fff / SYNC / STALE
 ```
 
 ---
@@ -669,6 +672,7 @@ Non-negotiable:
 10. Failure in one session cannot silently mutate another.
 11. Shared WebView manipulation is serialized through the dispatcher.
 12. Broker execution/fill is never inferred only from `CLICKED` or HTTP `2xx`.
+13. No scheduled click starts when the TSETMC exchange-clock sample is unavailable or stale.
 
 ---
 
@@ -693,6 +697,15 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
 - add session table;
 - Current Order Setup remains populated after Add to Schedule;
 - initially only one executable session if needed.
+
+### Stage 75.1 — Exchange-synchronized scheduler clock
+
+- synchronize read-only from the public HTTPS TSETMC market server;
+- advance synchronized time with a monotonic clock;
+- use exchange time for confirmation, pre-warm, slot, missed-slot, and end-window decisions;
+- show exchange time and freshness in the UI;
+- fail closed when exchange time is unavailable or stale;
+- preserve the official EasyTrader UI path, Prime Until Ready, and sent/in-flight accounting.
 
 ### Stage 76 — Move confirmation ownership into sessions
 
@@ -753,6 +766,9 @@ The redesign is complete when:
 - layout persists across launches;
 - repeated manual resize is unnecessary;
 - current stable one-second behavior remains testable;
+- scheduled start is based on a fresh TSETMC exchange-clock sample rather than the Windows wall
+  clock;
+- an unavailable or stale exchange clock prevents creation of a new scheduled click;
 - no unintended direct broker API path is introduced.
 
 ---
@@ -770,6 +786,7 @@ The following decisions are approved as the baseline:
 - reading another symbol updates the current setup panel in place;
 - existing sessions are independent of later current-setup edits;
 - multi-session priming uses the globally next-due slice;
+- scheduled timing uses a fail-closed, monotonic TSETMC exchange clock;
 - responsive layout and persisted geometry are functional requirements;
 - implementation is incremental, starting with UI/session structure before enabling true simultaneous multi-symbol execution.
 
