@@ -26,7 +26,7 @@ commit that contains the implementation.
 | 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
 | 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
 | 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
-| 78.2 — Pishro Kaman official UI adapter | In progress — runtime validation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655` |
+| 78.2 — Pishro Kaman official UI adapter | In progress — mobile origin verified; logged-in form validation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625` |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
@@ -435,8 +435,8 @@ commit that contains the implementation.
 
 ## Stage 78.2 — Pishro Kaman official UI adapter
 
-**Status:** In progress; control lifecycle and strict adapter implemented on 2026-09-01, logged-in
-runtime validation pending
+**Status:** In progress; control lifecycle and strict adapter implemented on 2026-09-01, exact
+Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validation pending
 
 **Implementation commit:** `8753f08b81ebb389404fae9fd81092dc46c9d6aa`
 (`Enable Pishro order workflow controls`)
@@ -446,6 +446,9 @@ runtime validation pending
 
 **Probe-result fix commit:** `3c7e390`
 (`Parse Pishro compatibility probe objects`)
+
+**Official-mobile-origin commit:** `2d68e7eb472c738d37b08d80edc763354ea07625`
+(`Trust Pishro mobile official origin`)
 
 ### Delivered changes
 
@@ -479,11 +482,18 @@ runtime validation pending
 - Corrected the sanitized compatibility-probe parser so it accepts both direct JSON objects and
   JSON-encoded strings returned by different WebView2 page contexts instead of reporting
   `INVALID_RESULT` for a valid direct object.
+- Replaced the single-origin Pishro assumption with an explicit exact allowlist containing only
+  `https://kaman.pishrobroker.ir` and `https://mobile.pishrobroker.ir`; no wildcard or arbitrary
+  Pishro subdomain is accepted.
+- Applied the same exact origin list to the sanitized compatibility probe and the separate Pishro
+  order UI adapter, and monitored the two corresponding exact hosts without broadening the
+  EasyTrader route.
 
 ### Changed files
 
 - `BrokerOfficialOrderUiBridge.cs` (new)
 - `PishroKamanOrderUiBridge.cs` (new)
+- `BrokerCompatibilityProbe.cs`
 - `BrokerProfile.cs`
 - `MainWindow.xaml.cs`
 - `OfficialOrderUiBridge.cs`
@@ -528,11 +538,21 @@ runtime validation pending
   `/trading-view/IRO9MSMI0D81` path with zero visible dialogs, inputs, or button actions while the
   broker showed its pre-login/mobile-version landing content; no field value or credential data was
   read and no HTTP POST was sent.
+- Debug and Release builds passed after the exact dual-origin change with zero errors; the existing
+  `NU1900` warning remained limited to the unavailable NuGet vulnerability feed.
+- Reflection/static checks accepted the two exact Pishro origins, rejected lookalike and
+  cross-broker origins, and confirmed that the generated Pishro script contains neither `fetch`,
+  `XMLHttpRequest`, nor a direct order endpoint.
+- A live Release probe on `https://mobile.pishrobroker.ir/Login` returned `PROBE_READY` and reported
+  only sanitized structure for the three visible login inputs. It explicitly reported field values
+  as not read, credential/header/body data as not read, final submit click as `NO`, and
+  `HTTP POST: NOT SENT`.
 - `git diff --check` passed before the implementation commit.
 
 ### Required runtime validation before completion
 
-- Sign in manually through the official Pishro page.
+- Complete and retain manual sign-in through the official Pishro page in the running Release
+  instance; authentication is never automated by FastOrder validation.
 - Confirm that the WebView has left the pre-login/mobile-version landing content before attempting
   to open or read an order form.
 - Open one official buy form and enter a non-sensitive test price and quantity.

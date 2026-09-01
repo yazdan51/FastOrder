@@ -62,7 +62,8 @@ No direct credentials, tokens, cookies, authorization values, or custom direct o
 The user selects the broker before login and order preparation. The supported broker profiles are:
 
 - EasyTrader: `https://d.easytrader.ir/`;
-- Pishro Kaman: `https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81`.
+- Pishro Kaman entry route: `https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81`, with the
+  associated official Hamrah Plus UI at `https://mobile.pishrobroker.ir/`.
 
 The selection is persisted between application launches and is always visible in the header and
 session list. Changing the selected broker:
@@ -105,11 +106,14 @@ The Pishro integration is deliberately staged. Stage 78.1 provides profile selec
 navigation, broker-bound snapshots/sessions, and a read-only structural compatibility probe. The
 probe may inspect only non-secret DOM structure and labels; it must not read field values, tokens,
 cookies, storage, request bodies, or headers, and it must not click or submit. Stage 78.2 adds a
-separate strict Pishro adapter and progressive control activation. The adapter accepts only an
-exact trusted origin, one unambiguous active ISIN discovered from the full URL, the visible order
-form, or explicit active-selection metadata, one unambiguous visible price/quantity pair, and one
-unambiguous official buy action. It remains fail-closed on any DOM ambiguity, and logged-in runtime
-validation is required before Stage 78.2 is marked complete. No private endpoint is guessed.
+separate strict Pishro adapter and progressive control activation. The Pishro profile uses an
+explicit exact allowlist containing only `https://kaman.pishrobroker.ir` and
+`https://mobile.pishrobroker.ir`; wildcards, sibling subdomains, and lookalike origins remain
+rejected. The adapter accepts only an origin in that list, one unambiguous active ISIN discovered
+from the full URL, the visible order form, or explicit active-selection metadata, one unambiguous
+visible price/quantity pair, and one unambiguous official buy action. It remains fail-closed on any
+DOM ambiguity, and logged-in order-form validation is required before Stage 78.2 is marked
+complete. No private endpoint is guessed.
 
 ---
 
@@ -807,6 +811,8 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
   user to complete official login manually before DOM validation;
 - accept both direct JSON objects and JSON-encoded strings from the read-only WebView2 compatibility
   probe without weakening origin validation or reading field values;
+- allow only the exact Pishro Kaman and official Hamrah Plus HTTPS origins and monitor only their two
+  exact hosts; do not accept arbitrary Pishro subdomains;
 - implement separate Pishro open/read/prepare/verify/click scripts;
 - keep Open and Read enabled after Pishro selection, while Prepare and Add to Schedule remain
   disabled until a successful read and explicit local confirmation;
