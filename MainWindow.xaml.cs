@@ -41,6 +41,9 @@ namespace FastOrder
             TimeSpan.FromSeconds(
                 3);
 
+        private const int DefaultScheduledSlicePriority =
+            0;
+
         private bool _webViewReady = false;
 
         private bool _monitoringEnabled = false;
@@ -71,6 +74,9 @@ namespace FastOrder
 
         private readonly OfficialOrderUiDispatcher _officialUiDispatcher =
             new OfficialOrderUiDispatcher();
+
+        private readonly GlobalNextDueQueue _globalNextDueQueue =
+            new GlobalNextDueQueue();
 
         private readonly CancellationTokenSource _applicationCancellation =
             new CancellationTokenSource();
@@ -2014,6 +2020,9 @@ namespace FastOrder
             int slotNumber =
                 0;
 
+            long nextSliceSequence =
+                1;
+
             object accountingLock =
                 new object();
 
@@ -2091,11 +2100,37 @@ namespace FastOrder
 
             try
             {
+                _globalNextDueQueue.RemoveSession(
+                    session.SessionId);
+
+                _globalNextDueQueue.Enqueue(
+                    new ScheduledSlice(
+                        session,
+                        startAt,
+                        DefaultScheduledSlicePriority,
+                        nextSliceSequence++));
+
+                WriteImportant(
+                    "GLOBAL NEXT-DUE ENQUEUED: " +
+                    session.SessionIdDisplay +
+                    " @ " +
+                    startAt.ToString(
+                        "HH:mm:ss.fff",
+                        CultureInfo.InvariantCulture));
+
                 // PRE-WARM:
-                // فرم رسمی خرید کمی قبل از startAt آماده می‌شود.
+                // فرم رسمی اولین slice سراسری کمی قبل از زمان هدف آماده می‌شود.
                 // این مرحله فقط prepare است و هیچ کلیک ارسال انجام نمی‌دهد.
+                if (!_globalNextDueQueue.TryPeek(
+                    out ScheduledSlice? initialNextDueSlice) ||
+                    initialNextDueSlice == null)
+                {
+                    throw new InvalidOperationException(
+                        "صف سراسری next-due پیش از pre-warm خالی است.");
+                }
+
                 DateTimeOffset preWarmAt =
-                    startAt -
+                    initialNextDueSlice.TargetTime -
                     ScheduledOrderPreWarmLeadTime;
 
                 WriteImportant(
@@ -2113,6 +2148,25 @@ namespace FastOrder
                 if (GetFreshExchangeTime() <
                     endAt)
                 {
+                    if (!TryCreateGloballyNextDueOrder(
+                        out ScheduledSlice? preWarmSlice,
+                        out Order? preWarmOrder,
+                        out string preWarmQueueError) ||
+                        preWarmSlice == null ||
+                        preWarmOrder == null)
+                    {
+                        session.SetState(
+                            OrderSessionState.Failed,
+                            "صف سراسری برای pre-warm معتبر نیست",
+                            preWarmQueueError);
+
+                        WriteScheduledOrderStopped(
+                            preWarmQueueError,
+                            "GLOBAL PRE-WARM QUEUE INVALID");
+
+                        return;
+                    }
+
                     session.SetState(
                         OrderSessionState.PreWarming,
                         "در حال آماده‌سازی فرم رسمی");
@@ -2128,16 +2182,12 @@ namespace FastOrder
                     OfficialOrderUiBridgeResult preWarmResult =
                         await DispatchPrepareAndClearOfficialOrderFormAsync(
                             coreWebView,
-                            CreateScheduledSliceOrder(
-                                order,
-                                Math.Min(
-                                    totalQuantity,
-                                    maxQuantityPerOrder)),
+                            preWarmOrder,
                             preWarmNonce,
                             "session-pre-warm:" +
-                            session.SessionIdDisplay,
+                            preWarmSlice.Session.SessionIdDisplay,
                             "در حال آماده‌سازی فرم " +
-                            session.SymbolName +
+                            preWarmSlice.Session.SymbolName +
                             "...",
                             cancellationSource.Token);
 
@@ -2177,11 +2227,9 @@ namespace FastOrder
                         "فرم رسمی برای اولین اسلات آماده است");
                 }
 
-                DateTimeOffset nextSlot =
-                    startAt;
-
-                while (nextSlot <
-                    endAt)
+                while (_globalNextDueQueue.TryPeek(
+                    out ScheduledSlice? nextDueSlice) &&
+                    nextDueSlice != null)
                 {
                     if (session.State ==
                         OrderSessionState.Failed)
@@ -2191,6 +2239,18 @@ namespace FastOrder
 
                     cancellationSource.Token
                         .ThrowIfCancellationRequested();
+
+                    if (!ReferenceEquals(
+                        nextDueSlice.Session,
+                        session))
+                    {
+                        throw new InvalidOperationException(
+                            "Stage 78 only schedules the active session; " +
+                            "concurrent session execution starts in Stage 79.");
+                    }
+
+                    DateTimeOffset nextSlot =
+                        nextDueSlice.TargetTime;
 
                     await DelayUntilExchangeTimeAsync(
                         nextSlot,
@@ -2214,6 +2274,16 @@ namespace FastOrder
                         break;
                     }
 
+                    if (!_globalNextDueQueue.TryDequeue(
+                        out ScheduledSlice? dequeuedSlice) ||
+                        !ReferenceEquals(
+                            dequeuedSlice,
+                            nextDueSlice))
+                    {
+                        throw new InvalidOperationException(
+                            "Global next-due queue changed before the due slice was dequeued.");
+                    }
+
                     if (!ReferenceEquals(
                         session.ConfirmedOrderSnapshot,
                         snapshot) ||
@@ -2234,6 +2304,7 @@ namespace FastOrder
                     slotNumber++;
 
                     long currentQuantity;
+                    bool totalAlreadySent;
 
                     lock (accountingLock)
                     {
@@ -2259,6 +2330,68 @@ namespace FastOrder
                                     inFlightQuantity +
                                     currentQuantity);
                         }
+
+                        totalAlreadySent =
+                            sentQuantity >=
+                            totalQuantity;
+                    }
+
+                    DateTimeOffset? sessionNextDueAt =
+                        null;
+
+                    if (!totalAlreadySent)
+                    {
+                        DateTimeOffset nextEligibleTarget =
+                            nextSlot +
+                            ScheduledOrderRetryDelay;
+
+                        // اگر event-loop دیر بیدار شد، slotهای گذشته burst نمی‌شوند.
+                        DateTimeOffset nowAfterScheduling =
+                            GetFreshExchangeTime();
+
+                        int skippedPastSlotCount =
+                            0;
+
+                        while (nextEligibleTarget <=
+                            nowAfterScheduling &&
+                            nextEligibleTarget <
+                            endAt)
+                        {
+                            nextEligibleTarget =
+                                nextEligibleTarget +
+                                ScheduledOrderRetryDelay;
+
+                            skippedPastSlotCount++;
+                        }
+
+                        if (skippedPastSlotCount > 0)
+                        {
+                            WriteImportant(
+                                "GLOBAL NEXT-DUE MISSED SLOTS SKIPPED: " +
+                                skippedPastSlotCount);
+                        }
+
+                        if (nextEligibleTarget <
+                            endAt)
+                        {
+                            _globalNextDueQueue.Enqueue(
+                                new ScheduledSlice(
+                                    session,
+                                    nextEligibleTarget,
+                                    DefaultScheduledSlicePriority,
+                                    nextSliceSequence++));
+
+                            sessionNextDueAt =
+                                nextEligibleTarget;
+
+                            WriteImportant(
+                                "GLOBAL NEXT-DUE ENQUEUED: " +
+                                session.SessionIdDisplay +
+                                " @ " +
+                                nextEligibleTarget.ToString(
+                                    "HH:mm:ss.fff",
+                                    CultureInfo.InvariantCulture));
+                        }
                     }
 
                     if (currentQuantity > 0)
@@ -2269,9 +2402,8 @@ namespace FastOrder
                         long capturedQuantity =
                             currentQuantity;
 
-                        DateTimeOffset capturedNextDueAt =
-                            nextSlot +
-                            ScheduledOrderRetryDelay;
+                        DateTimeOffset? capturedNextDueAt =
+                            sessionNextDueAt;
 
                         session.SetState(
                             OrderSessionState.Running,
@@ -2386,7 +2518,7 @@ namespace FastOrder
                             inFlightSnapshot);
 
                         UpdateSessionProgress(
-                            nextSlot,
+                            sessionNextDueAt,
                             "حجم آزاد برای اسلات جدید وجود ندارد");
                     }
 
@@ -2401,27 +2533,15 @@ namespace FastOrder
 
                     if (allQuantityAccounted)
                     {
+                        _globalNextDueQueue.RemoveSession(
+                            session.SessionId);
+
                         break;
                     }
-
-                    nextSlot =
-                        nextSlot +
-                        ScheduledOrderRetryDelay;
-
-                    // اگر event-loop دیر بیدار شد، slotهای گذشته burst نمی‌شوند.
-                    DateTimeOffset nowAfterScheduling =
-                        GetFreshExchangeTime();
-
-                    while (nextSlot <=
-                        nowAfterScheduling &&
-                        nextSlot <
-                        endAt)
-                    {
-                        nextSlot =
-                            nextSlot +
-                            ScheduledOrderRetryDelay;
-                    }
                 }
+
+                _globalNextDueQueue.RemoveSession(
+                    session.SessionId);
 
                 if (activeDispatchTasks.Count > 0)
                 {
@@ -2509,6 +2629,9 @@ namespace FastOrder
             }
             catch (OperationCanceledException)
             {
+                _globalNextDueQueue.RemoveSession(
+                    session.SessionId);
+
                 // لغو فقط از ایجاد slot جدید جلوگیری می‌کند.
                 // dispatchهایی که قبلاً شروع شده‌اند باید تا نتیجه UI
                 // ادامه پیدا کنند تا رزرو حجم اشتباه آزاد نشود.
@@ -2563,6 +2686,9 @@ namespace FastOrder
             }
             catch (Exception ex)
             {
+                _globalNextDueQueue.RemoveSession(
+                    session.SessionId);
+
                 WriteImportant(
                     "NON-BLOCKING CLOCK ERROR: " +
                     ex.Message);
@@ -2623,6 +2749,19 @@ namespace FastOrder
             }
             finally
             {
+                int removedQueuedSliceCount =
+                    _globalNextDueQueue.RemoveSession(
+                        session.SessionId);
+
+                if (removedQueuedSliceCount > 0)
+                {
+                    WriteImportant(
+                        "GLOBAL NEXT-DUE CLEANUP REMOVED: " +
+                        removedQueuedSliceCount +
+                        " | SESSION: " +
+                        session.SessionIdDisplay);
+                }
+
                 exchangeClockRefreshCancellation.Cancel();
 
                 try
@@ -2920,6 +3059,75 @@ namespace FastOrder
             };
         }
 
+        private bool TryCreateGloballyNextDueOrder(
+            out ScheduledSlice? scheduledSlice,
+            out Order? order,
+            out string errorMessage)
+        {
+            scheduledSlice =
+                null;
+
+            order =
+                null;
+
+            errorMessage =
+                "";
+
+            if (!_globalNextDueQueue.TryPeek(
+                out scheduledSlice) ||
+                scheduledSlice == null)
+            {
+                errorMessage =
+                    "صف سراسری next-due خالی است.";
+
+                return false;
+            }
+
+            OrderSession nextSession =
+                scheduledSlice.Session;
+
+            if (nextSession.State is
+                OrderSessionState.Completed or
+                OrderSessionState.Canceled or
+                OrderSessionState.Failed)
+            {
+                errorMessage =
+                    "نشست اولین slice سراسری در وضعیت پایانی قرار دارد.";
+
+                return false;
+            }
+
+            if (!TryGetValidatedSessionOrder(
+                nextSession,
+                out _,
+                out CreateOrderPayload? payload,
+                out errorMessage) ||
+                payload?.Order == null)
+            {
+                return false;
+            }
+
+            long nextQuantity =
+                Math.Min(
+                    nextSession.RemainingQuantity,
+                    nextSession.MaxQuantityPerOrder);
+
+            if (nextQuantity <= 0)
+            {
+                errorMessage =
+                    "برای اولین slice سراسری حجم آزاد وجود ندارد.";
+
+                return false;
+            }
+
+            order =
+                CreateScheduledSliceOrder(
+                    payload.Order,
+                    nextQuantity);
+
+            return true;
+        }
+
         private async Task<OfficialOrderUiBridgeResult>
             ExecuteClockDrivenSliceAttemptAsync(
                 CoreWebView2 coreWebView,
@@ -3002,9 +3210,8 @@ namespace FastOrder
                 if (result.HasStatus(
                     OfficialOrderUiBridge.ClickedStatus))
                 {
-                    await PrimeNextScheduledOrderFormAsync(
-                        coreWebView,
-                        order);
+                    await PrimeGloballyNextDueSliceAsync(
+                        coreWebView);
                 }
 
                 return result;
@@ -3027,6 +3234,49 @@ namespace FastOrder
                     Reason =
                         "Atomic scheduled UI action failed before a confirmed click."
                 };
+            }
+        }
+
+        private async Task PrimeGloballyNextDueSliceAsync(
+            CoreWebView2 coreWebView)
+        {
+            try
+            {
+                if (!TryCreateGloballyNextDueOrder(
+                    out ScheduledSlice? nextDueSlice,
+                    out Order? nextOrder,
+                    out string queueError) ||
+                    nextDueSlice == null ||
+                    nextOrder == null)
+                {
+                    WriteImportant(
+                        "GLOBAL NEXT-DUE PRIME SKIPPED: " +
+                        queueError);
+
+                    return;
+                }
+
+                WriteImportant(
+                    "GLOBAL NEXT-DUE PRIME TARGET: " +
+                    nextDueSlice.Session.SessionIdDisplay +
+                    " | " +
+                    nextDueSlice.Session.SymbolName +
+                    " @ " +
+                    nextDueSlice.TargetTime.ToString(
+                        "HH:mm:ss.fff",
+                        CultureInfo.InvariantCulture));
+
+                await PrimeNextScheduledOrderFormAsync(
+                    coreWebView,
+                    nextOrder);
+            }
+            catch (Exception ex)
+            {
+                // Prime صرفاً best-effort است. شکست آن نباید نتیجه CLICKED
+                // قبلی را به failure تبدیل کند یا حسابداری sent/in-flight را بشکند.
+                WriteImportant(
+                    "GLOBAL NEXT-DUE PRIME ERROR: " +
+                    ex.Message);
             }
         }
 
