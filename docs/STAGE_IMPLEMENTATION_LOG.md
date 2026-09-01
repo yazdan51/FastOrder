@@ -24,7 +24,7 @@ commit that contains the implementation.
 | 75.1 — Exchange-synchronized scheduler clock | Completed | 2026-09-01 | `35d004d4b777ddb3c2fa48f81293e822c5e155d0` |
 | 76 — Move confirmation ownership into sessions | Completed | 2026-09-01 | `755e8355aa7d3b8642e4422e1806671a9ec84770` |
 | 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
-| 78 — Global next-due priority queue | Not started | — | — |
+| 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
@@ -300,9 +300,71 @@ commit that contains the implementation.
   `BuildSubmitScript` verification path.
 - No live order was sent during Stage 77 verification.
 
+## Stage 78 — Global next-due priority queue
+
+**Status:** Completed on 2026-09-01
+
+**Commit:** `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` (`Schedule slices through global next-due queue`)
+
+### Delivered changes
+
+- Added a thread-safe `GlobalNextDueQueue` backed by `PriorityQueue` and limited it to at most one
+  future eligible slice per session.
+- Added deterministic slice ordering by target exchange time, explicit numeric priority, session
+  creation sequence, and a defensive per-session slice sequence as the final tie-breaker.
+- Migrated the active scheduler loop from its local `nextSlot` variable to dequeueing the globally
+  earliest due slice.
+- Enqueued the next eligible slice before launching the current UI dispatch, allowing a completed
+  official click to prime the actual globally next-due order.
+- Replaced blind same-order priming with a global queue lookup that rebuilds and validates the
+  order from the selected session-owned confirmed snapshot.
+- Preserved missed-slot behavior by skipping elapsed one-second targets before enqueueing the next
+  eligible slice; elapsed targets are never burst-replayed.
+- Removed a session's queued slice immediately when its window ends, cancellation or an internal
+  error stops scheduling, its total is fully sent, or final cleanup runs.
+- Kept priming best-effort so a prime failure cannot replace an already confirmed `CLICKED` result
+  or corrupt `sent`/`in-flight` settlement.
+- Kept the Stage 78 execution boundary explicit: the queue and scheduler source support global
+  ordering, but only the currently active session is executable until Stage 79.
+
+### Changed files
+
+- `GlobalNextDueQueue.cs` (new)
+- `MainWindow.xaml.cs`
+
+### Preserved behavior and non-goals
+
+- Concurrent active-session execution was not enabled; it remains Stage 79 scope.
+- Schedule timing, pre-warm, slot eligibility, missed-slot detection, and end-window checks remain
+  based on the fail-closed TSETMC exchange clock.
+- The one-second target cadence and no-burst missed-slot rule remain unchanged.
+- The central Official UI Dispatcher remains the only route for EasyTrader DOM operations.
+- Immediate symbol, ISIN, price, and quantity verification remains mandatory before every final
+  official click.
+- Existing `sent` and `in-flight` reservation and settlement accounting remains authoritative.
+- A slice is committed as sent only after `CLICKED`; HTTP activity is not treated as broker fill or
+  execution.
+- The final submit remains the official EasyTrader UI path; no direct broker order POST or
+  credential access was introduced.
+
+### Verification
+
+- Debug build passed with zero compilation errors.
+- Release build passed with zero compilation errors.
+- The only build warning was `NU1900`, caused by the unavailable NuGet vulnerability feed.
+- An in-memory four-session queue probe confirmed ordering by earlier target, then priority, then
+  session creation sequence; the observed creation-sequence order was `2, 4, 1, 3`.
+- The same probe confirmed that a duplicate future slice for one session is rejected and that
+  session cleanup removes the queued slice without leaving queue entries.
+- Static route checks confirmed that the scheduler loop consumes `_globalNextDueQueue`, global
+  priming is active, and the previous blind same-order prime call is absent.
+- The repository currently has no automated test project; the isolated queue probe was compiled
+  and executed in memory without adding test-only production files.
+- No live order was sent during Stage 78 verification.
+
 ## Template for future stages
 
-Copy this structure when completing Stage 78 and later stages:
+Copy this structure when completing Stage 79 and later stages:
 
 ```markdown
 ## Stage NN — Name
