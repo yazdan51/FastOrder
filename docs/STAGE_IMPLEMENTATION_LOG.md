@@ -25,6 +25,8 @@ commit that contains the implementation.
 | 76 — Move confirmation ownership into sessions | Completed | 2026-09-01 | `755e8355aa7d3b8642e4422e1806671a9ec84770` |
 | 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
 | 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
+| 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
+| 78.2 — Pishro Kaman official UI adapter | Awaiting logged-in DOM validation | — | — |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
@@ -362,9 +364,78 @@ commit that contains the implementation.
   and executed in memory without adding test-only production files.
 - No live order was sent during Stage 78 verification.
 
+## Stage 78.1 — User-selected broker route foundation
+
+**Status:** Completed on 2026-09-01
+
+**Commit:** `0bb94d8a3a3218333f2e60cdd1f94ff326730440` (`Add user-selected broker routing foundation`)
+
+### Delivered changes
+
+- Added an explicit broker selector for EasyTrader and Pishro Kaman and persisted the selected
+  broker across application launches.
+- Added validated broker profiles containing the stable broker id, display name, official HTTPS
+  route, exact trusted origin, monitored host, and official-order-UI capability state.
+- Navigated login and browser actions through the selected broker profile rather than a fixed
+  EasyTrader URL.
+- Blocked broker switching while a schedule or live submission is active.
+- Cleared Current Order Setup confirmation and broker-session network evidence after a permitted
+  broker change so stale data cannot cross the broker boundary.
+- Bound `ConfirmedOrderSnapshot` fingerprints to both the broker id and confirmed payload.
+- Added immutable broker identity and display name to every `OrderSession` and displayed the
+  broker in the session table.
+- Added scheduler and session validation that rejects a broker mismatch before any broker UI
+  operation.
+- Added a Pishro compatibility probe that validates the exact selected origin and reports only
+  sanitized structural DOM attributes and visible action labels.
+- Kept the Pishro order-form bridge fail-closed until its logged-in DOM contract is validated;
+  navigation and the read-only compatibility probe are available, but open/read/prepare/click
+  order operations are not yet enabled.
+- Updated network filtering for the known broker hosts while retaining value-free header-name and
+  status observation.
+
+### Changed files
+
+- `BrokerCompatibilityProbe.cs` (new)
+- `BrokerProfile.cs` (new)
+- `ConfirmedOrderSnapshot.cs`
+- `MainWindow.xaml`
+- `MainWindow.xaml.cs`
+- `OrderSession.cs`
+- `Properties/Settings.Designer.cs`
+- `Properties/Settings.settings`
+
+### Preserved behavior and non-goals
+
+- The existing EasyTrader official-UI submission route remains operational and broker-specific.
+- Pishro live order automation is not enabled in this stage; its selectors and submit contract
+  will not be guessed.
+- No token, cookie, authorization value, private field value, request body, or browser storage is
+  read or logged by the compatibility probe.
+- No direct broker API order path or credential access was introduced.
+- TSETMC exchange-clock timing, one-second slots, the missed-slot no-burst rule, the global
+  next-due queue, Prime Until Ready, the central dispatcher, and sent/in-flight accounting were
+  not changed.
+- Concurrent active-session execution remains Stage 79 scope.
+- No live order was sent during Stage 78.1 verification.
+
+### Verification
+
+- Debug build passed with zero compilation errors.
+- Release build passed with zero compilation errors.
+- The only build warning was `NU1900`, caused by the unavailable NuGet vulnerability feed.
+- A static probe-safety scan confirmed that the compatibility probe contains no cookie, local or
+  session storage, field-value, `fetch`, `XMLHttpRequest`, or click access.
+- An in-memory broker-foundation probe confirmed two registered profiles, accepted Pishro's exact
+  trusted origin, rejected a lookalike origin, produced distinct fingerprints for the same payload
+  under different brokers, and preserved broker identity in an independent snapshot copy.
+- A WPF UI Automation smoke check found the broker selector and compatibility-probe button in the
+  ready main window; no WebView interaction was performed.
+- `git diff --check` passed before the implementation commit.
+
 ## Template for future stages
 
-Copy this structure when completing Stage 79 and later stages:
+Copy this structure when completing Stage 78.2 and later stages:
 
 ```markdown
 ## Stage NN — Name

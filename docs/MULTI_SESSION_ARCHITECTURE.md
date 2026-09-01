@@ -19,7 +19,9 @@ The redesign must solve two practical problems:
 The target combines:
 
 - independent order sessions;
-- one safe dispatcher for the shared EasyTrader UI;
+- an explicit user-selected broker route;
+- separate official-UI adapters for EasyTrader and Pishro Kaman;
+- one safe dispatcher for the shared broker WebView;
 - a global next-due scheduling queue;
 - responsive WPF layout;
 - persistent window and splitter geometry;
@@ -52,6 +54,59 @@ UI CLICK -> EasyTrader -> Broker API
 Direct broker order POST from FastOrder is outside this redesign.
 
 No direct credentials, tokens, cookies, authorization values, or custom direct order submission are to be added.
+
+---
+
+## 2.1. User-selected broker route and multi-broker scenario
+
+The user selects the broker before login and order preparation. The supported broker profiles are:
+
+- EasyTrader: `https://d.easytrader.ir/`;
+- Pishro Kaman: `https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81`.
+
+The selection is persisted between application launches and is always visible in the header and
+session list. Changing the selected broker:
+
+- is blocked while a schedule or live submission is active;
+- clears the current confirmation and current setup because they belong to the previous broker;
+- clears broker-session evidence such as observed request/response state;
+- navigates only to the selected profile's official HTTPS route;
+- never mutates the immutable broker identity of an already-created session.
+
+Every confirmed snapshot and `OrderSession` is bound to an immutable `BrokerId`. A session may be
+prepared, validated, primed, and submitted only by the adapter for that same broker. DOM selectors,
+trusted origins, network-observation rules, and verification scripts must be broker-specific and
+must never be silently reused across brokers.
+
+The target broker-neutral scenario is:
+
+```text
+Select broker
+  -> navigate to that broker's official HTTPS route
+  -> user signs in manually
+  -> broker adapter validates the exact trusted origin
+  -> open/read the official order form
+  -> local order confirmation
+  -> bind confirmed payload + BrokerId into an immutable snapshot
+  -> final live confirmation
+  -> schedule from the fresh TSETMC exchange clock
+  -> global next-due queue
+  -> central Official UI Dispatcher
+  -> broker-specific immediate final verification
+  -> click that broker's official submit control
+  -> user verifies the result in that broker's official order list
+```
+
+The application continues to use one shared WebView and one central dispatcher. Until a future
+explicit multiple-WebView design is approved, concurrent sessions must belong to the currently
+selected broker; FastOrder must not navigate across brokers while a session is active.
+
+The current Pishro integration is deliberately staged. Stage 78.1 provides profile selection,
+official navigation, broker-bound snapshots/sessions, and a read-only structural compatibility
+probe. The probe may inspect only non-secret DOM structure and labels; it must not read field
+values, tokens, cookies, storage, request bodies, or headers, and it must not click or submit. The
+Pishro order adapter remains fail-closed until its logged-in DOM contract is validated in Stage
+78.2. No selector or endpoint may be guessed.
 
 ---
 
@@ -167,6 +222,7 @@ OrderSession
 {
     SessionId
     CreationSequence
+    BrokerId
 
     SymbolName
     SymbolIsin
@@ -662,7 +718,8 @@ Non-negotiable:
 
 1. No direct broker API credentials are read or stored.
 2. No direct custom order POST is introduced.
-3. Final submission uses the official EasyTrader UI path.
+3. Final submission uses the selected broker's validated official UI adapter; the currently
+   operational adapter is EasyTrader, and Pishro remains fail-closed until Stage 78.2.
 4. Symbol, ISIN, price, and quantity are revalidated immediately before every final click.
 5. Each session has independent sent/in-flight accounting.
 6. No session exceeds its configured total quantity.
@@ -673,6 +730,11 @@ Non-negotiable:
 11. Shared WebView manipulation is serialized through the dispatcher.
 12. Broker execution/fill is never inferred only from `CLICKED` or HTTP `2xx`.
 13. No scheduled click starts when the TSETMC exchange-clock sample is unavailable or stale.
+14. Every confirmed snapshot and session has one immutable `BrokerId`.
+15. A broker route cannot be changed while scheduling or a live submission is active.
+16. The active page origin must exactly match the selected broker profile's trusted origin.
+17. Broker-specific selectors and scripts cannot be reused for another broker without explicit
+    validation.
 
 ---
 
@@ -726,6 +788,23 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
 - global next-due priming;
 - deterministic tie-breaking.
 
+### Stage 78.1 — User-selected broker route foundation
+
+- add persisted EasyTrader/Pishro broker selection;
+- navigate only to the selected broker's official HTTPS route;
+- bind confirmed snapshots and sessions to an immutable broker identity;
+- add a sanitized, read-only structural compatibility probe;
+- keep Pishro order-form operations fail-closed until its DOM contract is validated.
+
+### Stage 78.2 — Pishro Kaman official UI adapter
+
+- validate the logged-in Pishro DOM through sanitized structural evidence;
+- implement separate Pishro open/read/prepare/verify/click scripts;
+- submit only through Pishro's official visible UI;
+- preserve the exchange-clock scheduler, Prime Until Ready, global queue, central dispatcher, and
+  sent/in-flight accounting unchanged;
+- do not add direct API submission or credential access.
+
 ### Stage 79 — Enable concurrent active sessions
 
 - several waiting/running sessions;
@@ -751,6 +830,14 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
 
 The redesign is complete when:
 
+- the user explicitly selects EasyTrader or Pishro before login and order preparation;
+- the selected broker is visible and persists across application launches;
+- broker selection cannot change while scheduling or a live submission is active;
+- each session displays and retains its immutable broker identity;
+- each broker uses its own validated trusted origin, selectors, and official-UI adapter;
+- Pishro supports the same open/read/prepare/verify/click workflow through its own official UI
+  adapter after Stage 78.2 validation;
+- no cross-broker selector reuse or silent broker navigation is possible;
 - one session can run while user prepares another;
 - multiple sessions for the same symbol are supported;
 - sessions for different symbols are supported;
@@ -777,6 +864,11 @@ The redesign is complete when:
 
 The following decisions are approved as the baseline:
 
+- the user selects the active broker profile explicitly;
+- broker selection is persisted, but an active session cannot be moved to another broker;
+- each broker has a separate official-UI adapter and exact trusted origin;
+- confirmed snapshots and sessions are cryptographically bound to their `BrokerId` through the
+  confirmation fingerprint;
 - multi-session architecture uses independent `OrderSession` objects;
 - EasyTrader execution remains official UI click, not direct order API;
 - one central dispatcher protects the shared WebView;
@@ -796,6 +888,8 @@ The following decisions are approved as the baseline:
 
 Simply re-enabling the currently disabled buttons is **not** sufficient.
 
-Without session isolation and a central UI dispatcher, two symbols could race while modifying the same EasyTrader order form.
+Without session isolation and a central UI dispatcher, two symbols could race while modifying the
+same broker order form. Likewise, reusing one broker's selectors on another broker could target an
+unrelated control.
 
 Therefore global UI re-enablement must be implemented together with the session/dispatcher architecture described in this document.
