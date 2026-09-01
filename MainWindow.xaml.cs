@@ -49,6 +49,7 @@ namespace FastOrder
         private bool _authorizationHeaderObserved = false;
         private bool _successfulSessionResponseObserved = false;
         private bool _successfulProtectedApiResponseObserved = false;
+        private bool _trustedOfficialOrderFormObserved = false;
         private ConfirmedOrderSnapshot? _currentOrderSnapshot;
         private readonly ObservableCollection<OrderSession> _orderSessions =
             new ObservableCollection<OrderSession>();
@@ -243,10 +244,28 @@ namespace FastOrder
                 _selectedBroker.SupportsOfficialOrderUiAutomation;
 
             PreviewOrderButton.IsEnabled =
-                orderUiAvailable;
+                orderUiAvailable &&
+                !_scheduledOrderActive &&
+                !_liveSubmissionInProgress;
 
             OrderUiDryRunTimingButton.IsEnabled =
-                orderUiAvailable;
+                orderUiAvailable &&
+                !_scheduledOrderActive &&
+                !_liveSubmissionInProgress &&
+                _currentOrderSnapshot != null;
+
+            if (orderUiAvailable &&
+                !_scheduledOrderActive &&
+                !_liveSubmissionInProgress &&
+                string.Equals(
+                    _selectedBroker.Id,
+                    BrokerProfiles.PishroKamanId,
+                    StringComparison.Ordinal))
+            {
+                // فرم سفارش کمان ممکن است بدون پنجره جداگانه روی صفحه حاضر باشد.
+                ReadOrderFormButton.IsEnabled =
+                    true;
+            }
 
             if (!orderUiAvailable)
             {
@@ -304,6 +323,9 @@ namespace FastOrder
                 false;
 
             _successfulProtectedApiResponseObserved =
+                false;
+
+            _trustedOfficialOrderFormObserved =
                 false;
 
             ResetLiveSubmissionTracking();
@@ -674,8 +696,9 @@ namespace FastOrder
 
                                 string json =
                                     await coreWebView.ExecuteScriptAsync(
-                                        OfficialOrderUiBridge
-                                            .BuildOpenCurrentSymbolBuyDialogScript());
+                                        BrokerOfficialOrderUiBridge
+                                            .BuildOpenCurrentSymbolBuyDialogScript(
+                                                _selectedBroker));
 
                                 OfficialOrderUiBridgeResult result =
                                     OfficialOrderUiBridge.ParseResult(
@@ -729,17 +752,29 @@ namespace FastOrder
                     result.HasStatus(OfficialOrderUiBridge.DialogAlreadyOpenStatus) ||
                     result.HasStatus(OfficialOrderUiBridge.DialogOpenRequestedStatus);
 
-                ReadOrderFormButton.IsEnabled = opened;
+                ReadOrderFormButton.IsEnabled =
+                    opened ||
+                    string.Equals(
+                        _selectedBroker.Id,
+                        BrokerProfiles.PishroKamanId,
+                        StringComparison.Ordinal);
 
                 SetStatus(opened
                     ? "فرم رسمی خرید باز شد؛ قیمت و تعداد را در " +
                       _selectedBroker.DisplayName +
                       " وارد کنید، سپس «خواندن و تأیید فرم» را بزنید."
-                    : "فرم نماد جاری باز نشد: " + OfficialOrderUiBridge.GetUserMessage(result.Status));
+                    : "فرم نماد جاری باز نشد: " +
+                      OfficialOrderUiBridge.GetUserMessage(
+                          result.Status,
+                          _selectedBroker.DisplayName));
             }
             catch (Exception ex)
             {
-                ReadOrderFormButton.IsEnabled = false;
+                ReadOrderFormButton.IsEnabled =
+                    string.Equals(
+                        _selectedBroker.Id,
+                        BrokerProfiles.PishroKamanId,
+                        StringComparison.Ordinal);
                 WriteImportant("OPEN CURRENT ORDER FORM ERROR: " + ex.Message);
                 SetStatus(
                     "خطا در باز کردن فرم سفارش " +
@@ -788,8 +823,9 @@ namespace FastOrder
                             cancellationToken.ThrowIfCancellationRequested();
 
                             return await coreWebView.ExecuteScriptAsync(
-                                OfficialOrderUiBridge
-                                    .BuildReadCurrentOrderFormScript());
+                                BrokerOfficialOrderUiBridge
+                                    .BuildReadCurrentOrderFormScript(
+                                        _selectedBroker));
                         });
 
                 OfficialOrderFormReadResult form =
@@ -799,7 +835,7 @@ namespace FastOrder
                 {
                     WriteImportant("");
                     WriteImportant("========================================");
-                    WriteImportant("READ EASYTRADER FORM FAILED");
+                    WriteImportant("READ BROKER FORM FAILED");
                     WriteImportant("========================================");
                     WriteImportant("STATUS: " + form.Status);
                     WriteImportant("REASON: " + form.Reason);
@@ -816,6 +852,9 @@ namespace FastOrder
                     SetStatus("اطلاعات فرم خوانده نشد: " + form.Status);
                     return;
                 }
+
+                _trustedOfficialOrderFormObserved =
+                    true;
 
                 if (!TryBuildPayloadFromOfficialForm(
                     form,
@@ -886,9 +925,9 @@ namespace FastOrder
                 WriteImportant("PRICE: " + payload.Order.Price);
                 WriteImportant("QUANTITY: " + payload.Order.Quantity);
                 WriteImportant("SIDE: BUY");
-                WriteImportant("COMMISSION AMOUNT (FROM EASYTRADER): " + form.CommissionAmount);
-                WriteImportant("COMMISSION RATE: DERIVED FROM EASYTRADER FORM");
-                WriteImportant("TOTAL VALUE (FROM EASYTRADER): " + form.TotalValue);
+                WriteImportant("COMMISSION AMOUNT (FROM BROKER FORM): " + form.CommissionAmount);
+                WriteImportant("COMMISSION RATE: DERIVED FROM BROKER FORM");
+                WriteImportant("TOTAL VALUE (FROM BROKER FORM): " + form.TotalValue);
                 WriteImportant("HTTP POST: NOT SENT");
                 WriteImportant("========================================");
 
@@ -899,8 +938,11 @@ namespace FastOrder
             catch (Exception ex)
             {
                 ReadOrderFormButton.IsEnabled = true;
-                WriteImportant("READ EASYTRADER ORDER FORM ERROR: " + ex.Message);
-                SetStatus("خطا در خواندن فرم سفارش EasyTrader.");
+                WriteImportant("READ BROKER ORDER FORM ERROR: " + ex.Message);
+                SetStatus(
+                    "خطا در خواندن فرم سفارش " +
+                    _selectedBroker.DisplayName +
+                    ".");
             }
         }
 
@@ -957,7 +999,7 @@ namespace FastOrder
                 System.Globalization.CultureInfo.InvariantCulture,
                 out long commissionAmount) || commissionAmount <= 0)
             {
-                error = "کارمزد معتبر از فرم EasyTrader خوانده نشد.";
+                error = "کارمزد معتبر از فرم رسمی کارگزاری خوانده نشد.";
                 return false;
             }
 
@@ -966,7 +1008,7 @@ namespace FastOrder
                 System.Globalization.CultureInfo.InvariantCulture,
                 out long totalValueFromForm) || totalValueFromForm <= 0)
             {
-                error = "قیمت کل معتبر از فرم EasyTrader خوانده نشد.";
+                error = "قیمت کل معتبر از فرم رسمی کارگزاری خوانده نشد.";
                 return false;
             }
 
@@ -1707,6 +1749,38 @@ namespace FastOrder
             }
         }
 
+        private bool HasCurrentBrokerAccessEvidence()
+        {
+            CoreWebView2? coreWebView =
+                Browser.CoreWebView2;
+
+            if (!_webViewReady ||
+                coreWebView == null ||
+                !_selectedBroker.IsTrustedPage(
+                    coreWebView.Source))
+            {
+                return false;
+            }
+
+            if (string.Equals(
+                _selectedBroker.Id,
+                BrokerProfiles.PishroKamanId,
+                StringComparison.Ordinal))
+            {
+                // در پیشرو، خواندن موفق فرم قابل‌مشاهده روی origin رسمی،
+                // شاهد غیرحساس دسترسی کاربر است؛ هیچ Token یا Cookie خوانده نمی‌شود.
+                return _trustedOfficialOrderFormObserved;
+            }
+
+            bool siteApiAccessObserved =
+                _authorizationHeaderObserved ||
+                _successfulProtectedApiResponseObserved;
+
+            return
+                _successfulSessionResponseObserved &&
+                siteApiAccessObserved;
+        }
+
         private void PrepareOrderButton_Click(
             object sender,
             RoutedEventArgs e)
@@ -1805,15 +1879,18 @@ namespace FastOrder
                 return;
             }
 
-            bool siteApiAccessObserved =
-                _authorizationHeaderObserved ||
-                _successfulProtectedApiResponseObserved;
+            bool brokerAccessObserved =
+                HasCurrentBrokerAccessEvidence();
 
-            if (!_successfulSessionResponseObserved ||
-                !siteApiAccessObserved)
+            if (!brokerAccessObserved)
             {
                 WriteImportant(
                     "RESULT: BLOCKED");
+                WriteImportant(
+                    "TRUSTED OFFICIAL FORM OBSERVED: " +
+                    (_trustedOfficialOrderFormObserved
+                        ? "YES"
+                        : "NO"));
                 WriteImportant(
                     "AUTHORIZATION HEADER PRESENCE OBSERVED: " +
                     (_authorizationHeaderObserved
@@ -1850,12 +1927,20 @@ namespace FastOrder
                 "PAYLOAD FINGERPRINT: " +
                 snapshot.ShortFingerprint);
             WriteImportant(
+                "TRUSTED OFFICIAL FORM OBSERVED: " +
+                (_trustedOfficialOrderFormObserved
+                    ? "YES"
+                    : "NO"));
+            WriteImportant(
                 "AUTHORIZATION HEADER PRESENCE OBSERVED: " +
                 (_authorizationHeaderObserved
                     ? "YES"
                     : "NO"));
             WriteImportant(
-                "SITE SESSION RESPONSE OBSERVED: YES");
+                "SITE SESSION RESPONSE OBSERVED: " +
+                (_successfulSessionResponseObserved
+                    ? "YES"
+                    : "NO"));
             WriteImportant(
                 "PROTECTED ORDER API SUCCESS OBSERVED: " +
                 (_successfulProtectedApiResponseObserved
@@ -1936,15 +2021,10 @@ namespace FastOrder
                 // فقط وجود شواهد غیرحساس نشست بررسی می‌شود. مقدار Token،
                 // Cookie یا Header در هیچ مرحله خوانده یا ذخیره نمی‌شود.
 
-                bool siteApiAccessObserved =
-                    _authorizationHeaderObserved ||
-                    _successfulProtectedApiResponseObserved;
-
-                if (!_successfulSessionResponseObserved ||
-                    !siteApiAccessObserved)
+                if (!HasCurrentBrokerAccessEvidence())
                 {
                     WriteLiveSubmissionBlocked(
-                        "نشست معتبر EasyTrader هنوز تأیید نشده است.");
+                        "صفحه رسمی و فرم تأییدشده کارگزاری فعال هنوز اعتبارسنجی نشده است.");
 
                     SendLiveOrderButton.IsEnabled =
                         true;
@@ -3228,7 +3308,8 @@ namespace FastOrder
             {
                 string verificationError =
                     OfficialOrderUiBridge.GetUserMessage(
-                        result.Status);
+                        result.Status,
+                        session.BrokerDisplayName);
 
                 session.SetState(
                     OrderSessionState.Failed,
@@ -3456,8 +3537,9 @@ namespace FastOrder
                             {
                                 string resultJson =
                                     await coreWebView.ExecuteScriptAsync(
-                                        OfficialOrderUiBridge
+                                        BrokerOfficialOrderUiBridge
                                             .BuildAtomicScheduledSubmitScript(
+                                                _selectedBroker,
                                                 order,
                                                 nonce));
 
@@ -3616,7 +3698,8 @@ namespace FastOrder
 
                     string prepareJson =
                         await coreWebView.ExecuteScriptAsync(
-                            OfficialOrderUiBridge.BuildPrepareScript(
+                            BrokerOfficialOrderUiBridge.BuildPrepareScript(
+                                _selectedBroker,
                                 order,
                                 nonce));
 
@@ -3653,7 +3736,8 @@ namespace FastOrder
 
                     string ensureJson =
                         await coreWebView.ExecuteScriptAsync(
-                            OfficialOrderUiBridge.BuildEnsureBuyDialogScript(
+                            BrokerOfficialOrderUiBridge.BuildEnsureBuyDialogScript(
+                                _selectedBroker,
                                 order));
 
                     OfficialOrderUiBridgeResult ensureResult =
@@ -3768,7 +3852,8 @@ namespace FastOrder
                 WriteImportant(
                     "REASON: " +
                     OfficialOrderUiBridge.GetUserMessage(
-                        prepareResult.Status));
+                        prepareResult.Status,
+                        _selectedBroker.DisplayName));
                 WriteImportant(
                     "HTTP POST: NOT SENT");
 
@@ -3855,7 +3940,8 @@ namespace FastOrder
                                 .ThrowIfCancellationRequested();
 
                             return await coreWebView.ExecuteScriptAsync(
-                                OfficialOrderUiBridge.BuildSubmitScript(
+                                BrokerOfficialOrderUiBridge.BuildSubmitScript(
+                                    _selectedBroker,
                                     order,
                                     preparationNonce));
                         },
@@ -3893,7 +3979,8 @@ namespace FastOrder
                 WriteImportant(
                     "REASON: " +
                     OfficialOrderUiBridge.GetUserMessage(
-                        submitResult.Status));
+                        submitResult.Status,
+                        _selectedBroker.DisplayName));
                 WriteImportant(
                     "HTTP POST: NOT SENT");
 
@@ -4085,6 +4172,9 @@ namespace FastOrder
         private void SetScheduledOrderControls(
             bool isActive)
         {
+            bool orderUiAvailable =
+                _selectedBroker.SupportsOfficialOrderUiAutomation;
+
             BrokerSelectionComboBox.IsEnabled =
                 !isActive;
 
@@ -4095,39 +4185,42 @@ namespace FastOrder
                 !isActive;
 
             PreviewOrderButton.IsEnabled =
-                isActive;
+                !isActive &&
+                orderUiAvailable;
+
+            ReadOrderFormButton.IsEnabled =
+                !isActive &&
+                orderUiAvailable &&
+                string.Equals(
+                    _selectedBroker.Id,
+                    BrokerProfiles.PishroKamanId,
+                    StringComparison.Ordinal);
 
             PrepareOrderButton.Content =
-                        "آماده‌سازی محلی";
+                _currentOrderSnapshot == null
+                    ? "آماده‌سازی محلی"
+                    : PrepareOrderButton.Content;
+
             PrepareOrderButton.IsEnabled =
-                true;
+                !isActive &&
+                orderUiAvailable &&
+                _currentOrderSnapshot != null;
 
             SendLiveOrderButton.IsEnabled =
-                true;
+                !isActive &&
+                orderUiAvailable &&
+                _currentOrderSnapshot != null;
 
             ReloadButton.IsEnabled =
-                isActive;
+                !isActive;
 
             CancelScheduledOrderButton.IsEnabled =
                 isActive;
 
-            if (!_selectedBroker.SupportsOfficialOrderUiAutomation)
-            {
-                PreviewOrderButton.IsEnabled =
-                    false;
-
-                ReadOrderFormButton.IsEnabled =
-                    false;
-
-                PrepareOrderButton.IsEnabled =
-                    false;
-
-                SendLiveOrderButton.IsEnabled =
-                    false;
-
-                OrderUiDryRunTimingButton.IsEnabled =
-                    false;
-            }
+            OrderUiDryRunTimingButton.IsEnabled =
+                !isActive &&
+                orderUiAvailable &&
+                _currentOrderSnapshot != null;
         }
 
         /// <summary>
@@ -4213,7 +4306,8 @@ namespace FastOrder
                 // ابتدا بررسی می‌شود شاید فرم از قبل باز و قابل‌آماده‌سازی باشد.
                 string prepareResultJson =
                     await coreWebView.ExecuteScriptAsync(
-                        OfficialOrderUiBridge.BuildPrepareScript(
+                        BrokerOfficialOrderUiBridge.BuildPrepareScript(
+                            _selectedBroker,
                             order,
                             preparationNonce));
 
@@ -4236,7 +4330,8 @@ namespace FastOrder
                 // اگر فرم وجود ندارد، نماد تأییدشده انتخاب و دکمه رسمی خرید باز می‌شود.
                 string ensureResultJson =
                     await coreWebView.ExecuteScriptAsync(
-                        OfficialOrderUiBridge.BuildEnsureBuyDialogScript(
+                        BrokerOfficialOrderUiBridge.BuildEnsureBuyDialogScript(
+                            _selectedBroker,
                             order));
 
                 OfficialOrderUiBridgeResult ensureResult =
@@ -4529,7 +4624,8 @@ namespace FastOrder
             try
             {
                 await coreWebView.ExecuteScriptAsync(
-                    OfficialOrderUiBridge.BuildClearScript(
+                    BrokerOfficialOrderUiBridge.BuildClearScript(
+                        _selectedBroker,
                         nonce));
             }
             catch (Exception)
@@ -5458,7 +5554,8 @@ namespace FastOrder
                             {
                                 string resultJson =
                                     await coreWebView.ExecuteScriptAsync(
-                                        OfficialOrderUiBridge.BuildPrepareScript(
+                                        BrokerOfficialOrderUiBridge.BuildPrepareScript(
+                                            _selectedBroker,
                                             order,
                                             nonce));
 

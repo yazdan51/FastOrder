@@ -1638,12 +1638,18 @@ namespace FastOrder
         }
 
         public static string GetUserMessage(
-            string status)
+            string status,
+            string? brokerDisplayName = null)
         {
+            string brokerName =
+                string.IsNullOrWhiteSpace(brokerDisplayName)
+                    ? "کارگزاری"
+                    : brokerDisplayName.Trim();
+
             return status switch
             {
                 "INVALID_ORIGIN" =>
-                    "صفحه فعال متعلق به EasyTrader نیست.",
+                    "صفحه فعال متعلق به " + brokerName + " نیست.",
 
                 "ORDER_DIALOG_NOT_FOUND" =>
                     "پنجره رسمی خرید به‌طور خودکار باز نشد.",
@@ -1652,10 +1658,10 @@ namespace FastOrder
                     "پنجره سفارش ابزار دیگری باز است؛ آن را ببندید و دوباره تلاش کنید.",
 
                 "BUY_ACTION_DISABLED" =>
-                    "دکمه رسمی خرید در EasyTrader غیرفعال است.",
+                    "دکمه رسمی خرید در " + brokerName + " غیرفعال است.",
 
                 "INSTRUMENT_NOT_VISIBLE" =>
-                    "نماد تأییدشده در صفحه فعلی EasyTrader قابل انتخاب نیست.",
+                    "نماد تأییدشده در صفحه فعلی " + brokerName + " قابل انتخاب نیست.",
 
                 "ORDER_DIALOG_OPEN_TIMEOUT" =>
                     "پنجره رسمی خرید در مهلت مقرر باز نشد.",
@@ -1673,7 +1679,7 @@ namespace FastOrder
                     "دکمه رسمی ارسال خرید پیدا نشد.",
 
                 "ORDER_ACTION_DISABLED" =>
-                    "دکمه رسمی ارسال خرید در EasyTrader غیرفعال است.",
+                    "دکمه رسمی ارسال خرید در " + brokerName + " غیرفعال است.",
 
                 "INPUT_UPDATE_FAILED" =>
                     "مقادیر فرم رسمی به‌طور قابل‌اعتماد تنظیم نشدند.",
@@ -1685,7 +1691,7 @@ namespace FastOrder
                     "قیمت یا تعداد پس از تأیید تغییر کرده است.",
 
                 _ =>
-                    "پاسخ مسیر رسمی EasyTrader قابل تأیید نبود."
+                    "پاسخ مسیر رسمی " + brokerName + " قابل تأیید نبود."
             };
         }
 

@@ -161,7 +161,7 @@ namespace FastOrder
             "https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81",
             "https://kaman.pishrobroker.ir",
             "kaman.pishrobroker.ir",
-            supportsOfficialOrderUiAutomation: false);
+            supportsOfficialOrderUiAutomation: true);
 
         public static IReadOnlyList<BrokerProfile> All
         {
