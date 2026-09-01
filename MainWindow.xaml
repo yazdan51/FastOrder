@@ -107,6 +107,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0"
@@ -132,6 +133,28 @@
                            TextWrapping="Wrap"
                            FontSize="15"
                            Foreground="#FF263238"/>
+
+                <StackPanel Grid.Column="2"
+                            Margin="22,0,0,0"
+                            VerticalAlignment="Center"
+                            FlowDirection="RightToLeft">
+                    <TextBlock Text="زمان مرکز معاملات"
+                               HorizontalAlignment="Right"
+                               FontSize="11"
+                               Foreground="#FF607D8B"/>
+                    <TextBlock x:Name="ExchangeClockTextBlock"
+                               Text="در حال همگام‌سازی..."
+                               Margin="0,2,0,0"
+                               MinWidth="205"
+                               HorizontalAlignment="Right"
+                               TextAlignment="Right"
+                               FlowDirection="LeftToRight"
+                               FontFamily="Consolas"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Foreground="#FFEF6C00"
+                               AutomationProperties.Name="زمان مرکز معاملات"/>
+                </StackPanel>
             </Grid>
         </Border>
 

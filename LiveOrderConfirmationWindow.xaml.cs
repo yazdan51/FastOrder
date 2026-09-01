@@ -16,6 +16,7 @@ namespace FastOrder
         };
 
         private readonly long _totalQuantity;
+        private readonly ExchangeClock _exchangeClock;
 
         public DateTimeOffset ScheduledStartAt
         {
@@ -35,12 +36,16 @@ namespace FastOrder
             private set;
         }
 
-        public LiveOrderConfirmationWindow(
+        internal LiveOrderConfirmationWindow(
             Order order,
-            string shortFingerprint)
+            string shortFingerprint,
+            ExchangeClock exchangeClock)
         {
             ArgumentNullException.ThrowIfNull(
                 order);
+
+            ArgumentNullException.ThrowIfNull(
+                exchangeClock);
 
             if (string.IsNullOrWhiteSpace(
                 shortFingerprint))
@@ -52,6 +57,9 @@ namespace FastOrder
 
             _totalQuantity =
                 order.Quantity;
+
+            _exchangeClock =
+                exchangeClock;
 
             InitializeComponent();
 
@@ -90,14 +98,26 @@ namespace FastOrder
             FingerprintTextBlock.Text =
                 shortFingerprint;
 
+            if (!_exchangeClock.TryGetReading(
+                ExchangeClock.ConfirmationMaximumSampleAge,
+                out ExchangeClockReading exchangeClockReading))
+            {
+                throw new InvalidOperationException(
+                    "A fresh TSETMC exchange-clock reading is required.");
+            }
+
             DateTimeOffset now =
-                DateTimeOffset.Now;
+                exchangeClockReading.Now;
 
             DateTimeOffset endOfToday =
                 new DateTimeOffset(
-                    DateTime.Today
-                        .AddDays(1)
-                        .AddSeconds(-1));
+                    now.Year,
+                    now.Month,
+                    now.Day,
+                    23,
+                    59,
+                    59,
+                    now.Offset);
 
             DateTimeOffset defaultStart =
                 now.AddMinutes(1);
@@ -130,6 +150,13 @@ namespace FastOrder
             MaxQuantityPerOrderTextBox.Text =
                 _totalQuantity.ToString(
                     CultureInfo.InvariantCulture);
+
+            ExchangeClockTextBlock.Text =
+                now.ToString(
+                    "yyyy-MM-dd HH:mm:ss.fff zzz",
+                    CultureInfo.InvariantCulture) +
+                " — " +
+                ExchangeClock.SourceDisplayName;
         }
 
         private static string FormatNumber(
@@ -245,28 +272,38 @@ namespace FastOrder
                 return false;
             }
 
-            DateTime startLocal =
-                DateTime.SpecifyKind(
-                    DateTime.Today.Add(
-                        startTime.ToTimeSpan()),
-                    DateTimeKind.Local);
+            if (!_exchangeClock.TryGetReading(
+                ExchangeClock.ConfirmationMaximumSampleAge,
+                out ExchangeClockReading exchangeClockReading))
+            {
+                errorMessage =
+                    "ساعت مرکز معاملات معتبر یا تازه نیست؛ پنجره را ببندید و دوباره تلاش کنید.";
 
-            DateTime endLocal =
-                DateTime.SpecifyKind(
-                    DateTime.Today.Add(
-                        endTime.ToTimeSpan()),
-                    DateTimeKind.Local);
+                return false;
+            }
+
+            DateTimeOffset now =
+                exchangeClockReading.Now;
 
             startAt =
                 new DateTimeOffset(
-                    startLocal);
+                    now.Year,
+                    now.Month,
+                    now.Day,
+                    startTime.Hour,
+                    startTime.Minute,
+                    startTime.Second,
+                    now.Offset);
 
             endAt =
                 new DateTimeOffset(
-                    endLocal);
-
-            DateTimeOffset now =
-                DateTimeOffset.Now;
+                    now.Year,
+                    now.Month,
+                    now.Day,
+                    endTime.Hour,
+                    endTime.Minute,
+                    endTime.Second,
+                    now.Offset);
 
             if (endAt <= now)
             {

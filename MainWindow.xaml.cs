@@ -8,6 +8,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace FastOrder
 {
@@ -35,6 +37,10 @@ namespace FastOrder
             TimeSpan.FromSeconds(
                 2);
 
+        private static readonly TimeSpan ExchangeClockRefreshInterval =
+            TimeSpan.FromSeconds(
+                3);
+
         private bool _webViewReady = false;
 
         private bool _monitoringEnabled = false;
@@ -59,6 +65,16 @@ namespace FastOrder
             _activeLiveSubmissionCompletion;
         private CancellationTokenSource? _scheduledOrderCancellation;
         private bool _scheduledOrderActive = false;
+
+        private readonly ExchangeClock _exchangeClock =
+            new ExchangeClock();
+
+        private readonly CancellationTokenSource _applicationCancellation =
+            new CancellationTokenSource();
+
+        private readonly DispatcherTimer _exchangeClockDisplayTimer;
+
+        private Task? _exchangeClockMaintenanceTask;
 
         private WindowState _lastNonMinimizedWindowState =
             WindowState.Normal;
@@ -97,6 +113,18 @@ namespace FastOrder
         public MainWindow()
         {
             InitializeComponent();
+
+            _exchangeClockDisplayTimer =
+                new DispatcherTimer(
+                    DispatcherPriority.Background)
+                {
+                    Interval =
+                        TimeSpan.FromMilliseconds(
+                            250)
+                };
+
+            _exchangeClockDisplayTimer.Tick +=
+                ExchangeClockDisplayTimer_Tick;
 
             SessionDataGrid.ItemsSource =
                 _orderSessions;
@@ -734,7 +762,104 @@ namespace FastOrder
             object sender,
             RoutedEventArgs e)
         {
+            _exchangeClockDisplayTimer.Start();
+
+            _exchangeClockMaintenanceTask =
+                MaintainExchangeClockAsync(
+                    _applicationCancellation.Token);
+
             await InitializeWebViewAsync();
+        }
+
+        private async Task MaintainExchangeClockAsync(
+            CancellationToken cancellationToken)
+        {
+            int sampleCount =
+                3;
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    ExchangeClockReading reading =
+                        await _exchangeClock.SynchronizeAsync(
+                            sampleCount,
+                            cancellationToken);
+
+                    sampleCount =
+                        1;
+
+                    WriteLog(
+                        "ساعت مرکز معاملات با " +
+                        ExchangeClock.SourceDisplayName +
+                        " همگام شد؛ RTT=" +
+                        reading.RoundTripTime.TotalMilliseconds.ToString(
+                            "F0",
+                            CultureInfo.InvariantCulture) +
+                        " ms.");
+                }
+                catch (OperationCanceledException)
+                    when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    WriteLog(
+                        "همگام‌سازی ساعت مرکز معاملات ناموفق بود: " +
+                        ex.Message);
+                }
+
+                try
+                {
+                    await Task.Delay(
+                        TimeSpan.FromSeconds(
+                            30),
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                    when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+
+        private void ExchangeClockDisplayTimer_Tick(
+            object? sender,
+            EventArgs e)
+        {
+            if (!_exchangeClock.TryGetReading(
+                TimeSpan.MaxValue,
+                out ExchangeClockReading reading))
+            {
+                ExchangeClockTextBlock.Text =
+                    "TSETMC | UNAVAILABLE";
+
+                ExchangeClockTextBlock.Foreground =
+                    Brushes.DarkRed;
+
+                return;
+            }
+
+            bool isFresh =
+                reading.SampleAge <=
+                ExchangeClock.SchedulerMaximumSampleAge;
+
+            ExchangeClockTextBlock.Text =
+                reading.Now.ToString(
+                    "HH:mm:ss.fff",
+                    CultureInfo.InvariantCulture) +
+                " | " +
+                ExchangeClock.SourceDisplayName +
+                (isFresh
+                    ? " | SYNC"
+                    : " | STALE");
+
+            ExchangeClockTextBlock.Foreground =
+                isFresh
+                    ? Brushes.DarkGreen
+                    : Brushes.DarkOrange;
         }
 
         // =====================================================
@@ -1502,6 +1627,49 @@ namespace FastOrder
                     return;
                 }
 
+                ExchangeClockReading exchangeClockReading;
+
+                try
+                {
+                    SetStatus(
+                        "در حال همگام‌سازی ساعت مرکز معاملات...");
+
+                    exchangeClockReading =
+                        await _exchangeClock.SynchronizeAsync(
+                            3,
+                            _applicationCancellation.Token);
+                }
+                catch (Exception ex)
+                {
+                    WriteImportant(
+                        "EXCHANGE CLOCK SYNC ERROR: " +
+                        ex.Message);
+
+                    WriteLiveSubmissionBlocked(
+                        "ساعت معتبر مرکز معاملات دریافت نشد؛ هیچ سفارشی ارسال نشد.");
+
+                    SendLiveOrderButton.IsEnabled =
+                        true;
+
+                    return;
+                }
+
+                WriteImportant(
+                    "EXCHANGE CLOCK: " +
+                    exchangeClockReading.Now.ToString(
+                        "yyyy-MM-dd HH:mm:ss.fff zzz",
+                        CultureInfo.InvariantCulture));
+
+                WriteImportant(
+                    "EXCHANGE CLOCK SOURCE: " +
+                    ExchangeClock.SourceDisplayName);
+
+                WriteImportant(
+                    "EXCHANGE CLOCK ESTIMATED UNCERTAINTY MS: " +
+                    exchangeClockReading.EstimatedUncertainty.TotalMilliseconds.ToString(
+                        "F0",
+                        CultureInfo.InvariantCulture));
+
                 CoreWebView2 coreWebView =
                     Browser.CoreWebView2
                     ?? throw new InvalidOperationException(
@@ -1514,7 +1682,8 @@ namespace FastOrder
                 LiveOrderConfirmationWindow confirmationWindow =
                     new LiveOrderConfirmationWindow(
                         order,
-                        snapshot.ShortFingerprint)
+                        snapshot.ShortFingerprint,
+                        _exchangeClock)
                     {
                         Owner = this
                     };
@@ -1563,6 +1732,53 @@ namespace FastOrder
                     return;
                 }
 
+                try
+                {
+                    exchangeClockReading =
+                        await _exchangeClock.SynchronizeAsync(
+                            3,
+                            _applicationCancellation.Token);
+                }
+                catch (Exception ex)
+                {
+                    WriteImportant(
+                        "EXCHANGE CLOCK REVALIDATION ERROR: " +
+                        ex.Message);
+
+                    WriteLiveSubmissionBlocked(
+                        "بازاعتبارسنجی ساعت مرکز معاملات ناموفق بود؛ هیچ سفارشی ارسال نشد.");
+
+                    SendLiveOrderButton.IsEnabled =
+                        true;
+
+                    return;
+                }
+
+                DateTimeOffset scheduledStartAt =
+                    confirmationWindow.ScheduledStartAt;
+
+                DateTimeOffset scheduledEndAt =
+                    confirmationWindow.ScheduledEndAt;
+
+                if (scheduledEndAt <=
+                    exchangeClockReading.Now)
+                {
+                    WriteLiveSubmissionBlocked(
+                        "بازه ارسال بر اساس ساعت مرکز معاملات پایان یافته است.");
+
+                    SendLiveOrderButton.IsEnabled =
+                        true;
+
+                    return;
+                }
+
+                if (scheduledStartAt <
+                    exchangeClockReading.Now)
+                {
+                    scheduledStartAt =
+                        exchangeClockReading.Now;
+                }
+
                 long creationSequence =
                     checked(
                         ++_nextOrderSessionSequence);
@@ -1572,8 +1788,8 @@ namespace FastOrder
                         creationSequence,
                         order,
                         confirmationWindow.MaxQuantityPerOrder,
-                        confirmationWindow.ScheduledStartAt,
-                        confirmationWindow.ScheduledEndAt,
+                        scheduledStartAt,
+                        scheduledEndAt,
                         snapshot);
 
                 createdSession.SetState(
@@ -1598,8 +1814,8 @@ namespace FastOrder
                     coreWebView,
                     snapshot,
                     order,
-                    confirmationWindow.ScheduledStartAt,
-                    confirmationWindow.ScheduledEndAt,
+                    scheduledStartAt,
+                    scheduledEndAt,
                     confirmationWindow.MaxQuantityPerOrder,
                     createdSession);
             }
@@ -1670,6 +1886,15 @@ namespace FastOrder
 
             using CancellationTokenSource cancellationSource =
                 new CancellationTokenSource();
+
+            using CancellationTokenSource exchangeClockRefreshCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationSource.Token,
+                    _applicationCancellation.Token);
+
+            Task exchangeClockRefreshTask =
+                RefreshExchangeClockDuringScheduleAsync(
+                    exchangeClockRefreshCancellation.Token);
 
             _scheduledOrderCancellation =
                 cancellationSource;
@@ -1779,27 +2004,19 @@ namespace FastOrder
                     startAt -
                     ScheduledOrderPreWarmLeadTime;
 
-                TimeSpan preWarmWait =
-                    preWarmAt -
-                    DateTimeOffset.Now;
+                WriteImportant(
+                    "PRE-WARM WAIT UNTIL: " +
+                    preWarmAt.ToString(
+                        "HH:mm:ss.fff"));
 
-                if (preWarmWait >
-                    TimeSpan.Zero)
-                {
-                    WriteImportant(
-                        "PRE-WARM WAIT UNTIL: " +
-                        preWarmAt.ToString(
-                            "HH:mm:ss.fff"));
-
-                    await Task.Delay(
-                        preWarmWait,
-                        cancellationSource.Token);
-                }
+                await DelayUntilExchangeTimeAsync(
+                    preWarmAt,
+                    cancellationSource.Token);
 
                 cancellationSource.Token
                     .ThrowIfCancellationRequested();
 
-                if (DateTimeOffset.Now <
+                if (GetFreshExchangeTime() <
                     endAt)
                 {
                     session.SetState(
@@ -1814,7 +2031,7 @@ namespace FastOrder
                     try
                     {
                         DateTimeOffset preWarmStartedAt =
-                            DateTimeOffset.Now;
+                            GetFreshExchangeTime();
 
                         OfficialOrderUiBridgeResult preWarmResult =
                             await PrepareOfficialOrderFormAsync(
@@ -1828,7 +2045,7 @@ namespace FastOrder
                                 cancellationSource.Token);
 
                         DateTimeOffset preWarmCompletedAt =
-                            DateTimeOffset.Now;
+                            GetFreshExchangeTime();
 
                         WriteImportant("");
                         WriteImportant(
@@ -1879,23 +2096,15 @@ namespace FastOrder
                     cancellationSource.Token
                         .ThrowIfCancellationRequested();
 
-                    TimeSpan wait =
-                        nextSlot -
-                        DateTimeOffset.Now;
-
-                    if (wait >
-                        TimeSpan.Zero)
-                    {
-                        await Task.Delay(
-                            wait,
-                            cancellationSource.Token);
-                    }
+                    await DelayUntilExchangeTimeAsync(
+                        nextSlot,
+                        cancellationSource.Token);
 
                     cancellationSource.Token
                         .ThrowIfCancellationRequested();
 
                     DateTimeOffset slotStartedAt =
-                        DateTimeOffset.Now;
+                        GetFreshExchangeTime();
 
                     if (slotStartedAt >=
                         endAt)
@@ -2099,7 +2308,7 @@ namespace FastOrder
 
                     // اگر event-loop دیر بیدار شد، slotهای گذشته burst نمی‌شوند.
                     DateTimeOffset nowAfterScheduling =
-                        DateTimeOffset.Now;
+                        GetFreshExchangeTime();
 
                     while (nextSlot <=
                         nowAfterScheduling &&
@@ -2312,6 +2521,16 @@ namespace FastOrder
             }
             finally
             {
+                exchangeClockRefreshCancellation.Cancel();
+
+                try
+                {
+                    await exchangeClockRefreshTask;
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
                 ResetLiveSubmissionTracking();
 
                 if (ReferenceEquals(
@@ -2337,6 +2556,89 @@ namespace FastOrder
 
                 SetScheduledOrderControls(
                     false);
+            }
+        }
+
+        private DateTimeOffset GetFreshExchangeTime()
+        {
+            if (!_exchangeClock.TryGetReading(
+                ExchangeClock.SchedulerMaximumSampleAge,
+                out ExchangeClockReading reading))
+            {
+                throw new InvalidOperationException(
+                    "ساعت مرکز معاملات معتبر یا تازه نیست؛ ایجاد slot جدید متوقف شد.");
+            }
+
+            return reading.Now;
+        }
+
+        private async Task DelayUntilExchangeTimeAsync(
+            DateTimeOffset targetTime,
+            CancellationToken cancellationToken)
+        {
+            TimeSpan maximumDelayChunk =
+                TimeSpan.FromSeconds(
+                    1);
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                TimeSpan remaining =
+                    targetTime -
+                    GetFreshExchangeTime();
+
+                if (remaining <=
+                    TimeSpan.Zero)
+                {
+                    return;
+                }
+
+                await Task.Delay(
+                    remaining < maximumDelayChunk
+                        ? remaining
+                        : maximumDelayChunk,
+                    cancellationToken);
+            }
+        }
+
+        private async Task RefreshExchangeClockDuringScheduleAsync(
+            CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(
+                        ExchangeClockRefreshInterval,
+                        cancellationToken);
+
+                    ExchangeClockReading reading =
+                        await _exchangeClock.SynchronizeAsync(
+                            1,
+                            cancellationToken);
+
+                    WriteImportant(
+                        "EXCHANGE CLOCK REFRESH: " +
+                        reading.Now.ToString(
+                            "HH:mm:ss.fff",
+                            CultureInfo.InvariantCulture) +
+                        " | RTT MS: " +
+                        reading.RoundTripTime.TotalMilliseconds.ToString(
+                            "F0",
+                            CultureInfo.InvariantCulture));
+                }
+                catch (OperationCanceledException)
+                    when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    WriteImportant(
+                        "EXCHANGE CLOCK REFRESH FAILED: " +
+                        ex.Message);
+                }
             }
         }
 
@@ -2783,7 +3085,7 @@ namespace FastOrder
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (DateTimeOffset.Now >=
+            if (GetFreshExchangeTime() >=
                 endAt)
             {
                 await TryClearOfficialPreparedStateAsync(
@@ -4764,6 +5066,10 @@ namespace FastOrder
 
             try
             {
+                _exchangeClockDisplayTimer.Stop();
+
+                _applicationCancellation.Cancel();
+
                 _scheduledOrderCancellation?.Cancel();
 
                 if (Browser?.CoreWebView2 != null)

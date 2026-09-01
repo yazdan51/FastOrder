@@ -100,39 +100,63 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" Grid.Column="0"
+                <Border Grid.Row="0"
+                        Grid.Column="0"
+                        Grid.ColumnSpan="5"
+                        Margin="0,0,0,12"
+                        Padding="9,7"
+                        Background="#FFE8F5E9"
+                        BorderBrush="#FF81C784"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                    <StackPanel>
+                        <TextBlock Text="مرجع زمان‌بندی: ساعت سرور عمومی مرکز معاملات بورس"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FF1B5E20"/>
+                        <TextBlock x:Name="ExchangeClockTextBlock"
+                                   Margin="0,4,0,0"
+                                   FlowDirection="LeftToRight"
+                                   TextAlignment="Right"
+                                   FontFamily="Consolas"
+                                   Foreground="#FF263238"
+                                   AutomationProperties.Name="زمان همگام‌شده مرکز معاملات"/>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Grid.Row="1" Grid.Column="0"
                            Text="ساعت شروع:"
                            VerticalAlignment="Center"
                            FontWeight="SemiBold"/>
                 <TextBox x:Name="StartTimeTextBox"
-                         Grid.Row="0" Grid.Column="1"
+                         Grid.Row="1" Grid.Column="1"
                          Height="32"
                          VerticalContentAlignment="Center"
                          FlowDirection="LeftToRight"
                          TextAlignment="Center"
                          AutomationProperties.Name="ساعت شروع ارسال"/>
 
-                <TextBlock Grid.Row="0" Grid.Column="3"
+                <TextBlock Grid.Row="1" Grid.Column="3"
                            Text="ساعت پایان:"
                            VerticalAlignment="Center"
                            FontWeight="SemiBold"/>
                 <TextBox x:Name="EndTimeTextBox"
-                         Grid.Row="0" Grid.Column="4"
+                         Grid.Row="1" Grid.Column="4"
                          Height="32"
                          VerticalContentAlignment="Center"
                          FlowDirection="LeftToRight"
                          TextAlignment="Center"
                          AutomationProperties.Name="ساعت پایان ارسال"/>
 
-                <TextBlock Grid.Row="1" Grid.Column="0"
+                <TextBlock Grid.Row="2" Grid.Column="0"
                            Text="سقف هر سفارش:"
                            Margin="0,10,0,0"
                            VerticalAlignment="Center"
                            FontWeight="SemiBold"/>
                 <TextBox x:Name="MaxQuantityPerOrderTextBox"
-                         Grid.Row="1" Grid.Column="1"
+                         Grid.Row="2" Grid.Column="1"
                          Height="32"
                          Margin="0,10,0,0"
                          VerticalContentAlignment="Center"
@@ -140,19 +164,19 @@
                          TextAlignment="Center"
                          AutomationProperties.Name="حداکثر حجم هر سفارش"/>
 
-                <TextBlock Grid.Row="1" Grid.Column="3"
+                <TextBlock Grid.Row="2" Grid.Column="3"
                            Text="فاصله ارسال:"
                            Margin="0,10,0,0"
                            VerticalAlignment="Center"
                            FontWeight="SemiBold"/>
-                <TextBlock Grid.Row="1" Grid.Column="4"
+                <TextBlock Grid.Row="2" Grid.Column="4"
                            Text="۱ ثانیه"
                            Margin="0,10,0,0"
                            VerticalAlignment="Center"
                            FontWeight="Bold"/>
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="5"
-                           Text="قالب ساعت: HH:mm یا HH:mm:ss — سقف هر سفارش باید عدد مثبت و حداکثر برابر حجم کل باشد. پاسخ مبهم چرخه را متوقف می‌کند."
+                <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="5"
+                           Text="قالب ساعت: HH:mm یا HH:mm:ss — شروع، پایان و slotها بر اساس ساعت مرکز معاملات هستند. اگر این ساعت معتبر یا تازه نباشد، ارسال متوقف می‌شود."
                            Margin="0,9,0,0"
                            Foreground="#FF555555"
                            TextWrapping="Wrap"/>
