@@ -62,8 +62,9 @@ No direct credentials, tokens, cookies, authorization values, or custom direct o
 The user selects the broker before login and order preparation. The supported broker profiles are:
 
 - EasyTrader: `https://d.easytrader.ir/`;
-- Pishro Kaman entry route: `https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81`, with the
-  associated official Hamrah Plus UI at `https://mobile.pishrobroker.ir/`.
+- Pishro primary route: the official Hamrah Plus UI at `https://mobile.pishrobroker.ir/`;
+- Pishro secondary trusted origin: the Kaman referral/landing route at
+  `https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81`.
 
 The selection is persisted between application launches and is always visible in the header and
 session list. Changing the selected broker:
@@ -813,6 +814,8 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
   probe without weakening origin validation or reading field values;
 - allow only the exact Pishro Kaman and official Hamrah Plus HTTPS origins and monitor only their two
   exact hosts; do not accept arbitrary Pishro subdomains;
+- navigate the selected Pishro profile directly to Hamrah Plus instead of requiring an extra click
+  through Kaman's promotional landing page;
 - implement separate Pishro open/read/prepare/verify/click scripts;
 - keep Open and Read enabled after Pishro selection, while Prepare and Add to Schedule remain
   disabled until a successful read and explicit local confirmation;

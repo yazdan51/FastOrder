@@ -26,7 +26,7 @@ commit that contains the implementation.
 | 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
 | 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
 | 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
-| 78.2 — Pishro Kaman official UI adapter | In progress — mobile origin verified; logged-in form validation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625` |
+| 78.2 — Pishro Kaman official UI adapter | In progress — mobile origin verified; logged-in form validation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625`, `d81c0007b531e8545e3938eb73819602760f1931` |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
@@ -450,6 +450,9 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
 **Official-mobile-origin commit:** `2d68e7eb472c738d37b08d80edc763354ea07625`
 (`Trust Pishro mobile official origin`)
 
+**Direct-Hamrah-Plus commit:** `d81c0007b531e8545e3938eb73819602760f1931`
+(`Open Pishro directly in Hamrah Plus`)
+
 ### Delivered changes
 
 - Removed the permanent Pishro capability gate that disabled every order-workflow control.
@@ -488,6 +491,9 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
 - Applied the same exact origin list to the sanitized compatibility probe and the separate Pishro
   order UI adapter, and monitored the two corresponding exact hosts without broadening the
   EasyTrader route.
+- Made the official Hamrah Plus root the Pishro profile's primary navigation target. The Kaman
+  origin remains an exact secondary trusted origin, but FastOrder no longer starts on its
+  promotional `Enter new version` landing page.
 
 ### Changed files
 
@@ -547,6 +553,10 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
   only sanitized structure for the three visible login inputs. It explicitly reported field values
   as not read, credential/header/body data as not read, final submit click as `NO`, and
   `HTTP POST: NOT SENT`.
+- A rebuilt Release launch navigated directly to `https://mobile.pishrobroker.ir/` and then followed
+  the site's own invalid-session flow through `/Logout` to `/Login`; it did not navigate through
+  the Kaman landing page. This confirmed the new direct entry route while leaving authentication
+  entirely manual.
 - `git diff --check` passed before the implementation commit.
 
 ### Required runtime validation before completion
