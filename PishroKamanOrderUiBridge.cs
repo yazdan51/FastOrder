@@ -252,10 +252,65 @@ namespace FastOrder
                             !(buyAction instanceof HTMLElement)) return null;
                         return { scope, priceInput, quantityInput, buyAction };
                     };
-                    const routeIsin = () => {
-                        const match = String(location.pathname || "")
-                            .toUpperCase().match(/IR[A-Z0-9]{10}/);
-                        return match ? match[0] : "";
+                    const extractIsins = value => Array.from(new Set(
+                        String(value ?? "")
+                            .toUpperCase()
+                            .match(/IR[A-Z0-9]{10}/g) || []));
+                    const isinsFromElements = elements => {
+                        const found = new Set();
+                        for (const element of elements) {
+                            if (!(element instanceof Element)) continue;
+                            for (const attribute of Array.from(element.attributes || [])) {
+                                for (const isin of extractIsins(attribute.value))
+                                    found.add(isin);
+                            }
+                        }
+                        return Array.from(found);
+                    };
+                    const discoverActiveInstrument = formScope => {
+                        const urlIsins = extractIsins(location.href);
+                        if (urlIsins.length > 0)
+                            return { candidates: urlIsins, source: "url" };
+
+                        if (formScope instanceof Element) {
+                            const formElements = [
+                                formScope,
+                                ...formScope.querySelectorAll("*")
+                            ];
+                            let ancestor = formScope.parentElement;
+                            for (let depth = 0;
+                                 depth < 5 && ancestor instanceof HTMLElement;
+                                 depth += 1, ancestor = ancestor.parentElement) {
+                                formElements.push(ancestor);
+                            }
+                            const formIsins = isinsFromElements(formElements);
+                            if (formIsins.length > 0)
+                                return { candidates: formIsins, source: "order-form" };
+
+                            const visibleFormText = norm(formScope.textContent);
+                            if (visibleFormText.length <= 2000) {
+                                const textIsins = extractIsins(visibleFormText);
+                                if (textIsins.length > 0)
+                                    return { candidates: textIsins, source: "visible-form" };
+                            }
+                        }
+
+                        const selectedRoots = Array.from(document.querySelectorAll(
+                            '[aria-selected="true"],' +
+                            '[data-selected="true"],' +
+                            '[data-active="true"],' +
+                            '[data-state="active"]'))
+                            .filter(visible);
+                        const selectedElements = [];
+                        for (const root of selectedRoots) {
+                            selectedElements.push(root);
+                            selectedElements.push(...root.querySelectorAll("*"));
+                        }
+                        const selectedIsins = isinsFromElements(selectedElements);
+                        if (selectedIsins.length > 0)
+                            return { candidates: selectedIsins, source: "active-selection" };
+
+                        return { candidates: [], source: "none" };
                     };
                     const pageSymbolName = isin => {
                         const selectors = [
@@ -311,23 +366,30 @@ namespace FastOrder
                         input.dispatchEvent(new Event("blur", { bubbles: true }));
                         return num(input.value) === value;
                     };
-                    const verifyInstrument = currentIsin => {
-                        if (!currentIsin)
+                    const verifyInstrument = discovery => {
+                        const candidates = Array.isArray(discovery?.candidates)
+                            ? discovery.candidates
+                            : [];
+                        if (candidates.length === 0)
                             return result("INSTRUMENT_NOT_VERIFIED",
-                                "Pishro route did not expose a valid ISIN.");
+                                "Pishro URL, visible order form, and active selection did not expose a valid ISIN.");
+                        if (candidates.length !== 1)
+                            return result("INSTRUMENT_AMBIGUOUS",
+                                `Pishro exposed ${candidates.length} possible ISIN values in ${discovery.source}.`);
+                        const currentIsin = candidates[0];
                         if (expectedSymbolIsin && currentIsin !== expectedSymbolIsin)
                             return result("INSTRUMENT_NOT_VERIFIED",
-                                "Pishro route ISIN did not match the confirmed order.");
+                                `Pishro ${discovery.source} ISIN did not match the confirmed order.`);
                         return null;
                     };
                     const prepare = () => {
-                        const currentIsin = routeIsin();
-                        const instrumentError = verifyInstrument(currentIsin);
-                        if (instrumentError) return instrumentError;
                         const form = locateForm();
                         if (!form)
                             return result("ORDER_DIALOG_NOT_FOUND",
                                 "One unambiguous visible Pishro buy form was not found.");
+                        const discovery = discoverActiveInstrument(form.scope);
+                        const instrumentError = verifyInstrument(discovery);
+                        if (instrumentError) return instrumentError;
                         if (form.buyAction instanceof HTMLButtonElement &&
                             (form.buyAction.disabled ||
                              form.buyAction.getAttribute("aria-disabled") === "true"))
@@ -357,13 +419,13 @@ namespace FastOrder
                             prepared.price !== expectedPrice)
                             return result("PREPARATION_EXPIRED",
                                 "Prepared Pishro form state was no longer valid.");
-                        const currentIsin = routeIsin();
-                        const instrumentError = verifyInstrument(currentIsin);
-                        if (instrumentError) return instrumentError;
                         const form = locateForm();
                         if (!form)
                             return result("ORDER_DIALOG_NOT_FOUND",
                                 "One unambiguous visible Pishro buy form was not found.");
+                        const discovery = discoverActiveInstrument(form.scope);
+                        const instrumentError = verifyInstrument(discovery);
+                        if (instrumentError) return instrumentError;
                         if (num(form.quantityInput.value) !== expectedQuantity ||
                             num(form.priceInput.value) !== expectedPrice)
                             return result("ORDER_VALUES_CHANGED",
@@ -391,12 +453,13 @@ namespace FastOrder
                     }
 
                     if (mode === "open" || mode === "ensure") {
-                        const currentIsin = routeIsin();
+                        const form = locateForm();
                         if (mode === "ensure") {
-                            const instrumentError = verifyInstrument(currentIsin);
+                            const discovery = discoverActiveInstrument(form?.scope);
+                            const instrumentError = verifyInstrument(discovery);
                             if (instrumentError) return instrumentError;
                         }
-                        if (locateForm())
+                        if (form)
                             return result("DIALOG_ALREADY_OPEN",
                                 "Usable official Pishro buy form is already visible.");
                         const buyTab = findSafeBuyTab();
@@ -410,13 +473,14 @@ namespace FastOrder
                     }
 
                     if (mode === "read") {
-                        const currentIsin = routeIsin();
-                        const instrumentError = verifyInstrument(currentIsin);
-                        if (instrumentError) return instrumentError;
                         const form = locateForm();
                         if (!form)
                             return result("ORDER_DIALOG_NOT_FOUND",
                                 "One unambiguous visible Pishro buy form was not found.");
+                        const discovery = discoverActiveInstrument(form.scope);
+                        const instrumentError = verifyInstrument(discovery);
+                        if (instrumentError) return instrumentError;
+                        const currentIsin = discovery.candidates[0];
                         const price = num(form.priceInput.value);
                         const quantity = num(form.quantityInput.value);
                         if (!price || !quantity)
