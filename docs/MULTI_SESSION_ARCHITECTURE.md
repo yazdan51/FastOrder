@@ -106,9 +106,10 @@ navigation, broker-bound snapshots/sessions, and a read-only structural compatib
 probe may inspect only non-secret DOM structure and labels; it must not read field values, tokens,
 cookies, storage, request bodies, or headers, and it must not click or submit. Stage 78.2 adds a
 separate strict Pishro adapter and progressive control activation. The adapter accepts only an
-exact trusted origin, an ISIN in the official route, one unambiguous visible price/quantity pair,
-and one unambiguous official buy action. It remains fail-closed on any DOM ambiguity, and logged-in
-runtime validation is required before Stage 78.2 is marked complete. No private endpoint is guessed.
+exact trusted origin, one unambiguous active ISIN discovered from the full URL, the visible order
+form, or explicit active-selection metadata, one unambiguous visible price/quantity pair, and one
+unambiguous official buy action. It remains fail-closed on any DOM ambiguity, and logged-in runtime
+validation is required before Stage 78.2 is marked complete. No private endpoint is guessed.
 
 ---
 
@@ -722,7 +723,7 @@ Non-negotiable:
 2. No direct custom order POST is introduced.
 3. Final submission uses the selected broker's official UI adapter. EasyTrader retains its
    validated adapter; Pishro uses its separate strict adapter and fails closed unless every
-   required visible control, route ISIN, value, and preparation nonce is unambiguous.
+   required visible control, active-instrument ISIN, value, and preparation nonce is unambiguous.
 4. Symbol, ISIN, price, and quantity are revalidated immediately before every final click.
 5. Each session has independent sent/in-flight accounting.
 6. No session exceeds its configured total quantity.

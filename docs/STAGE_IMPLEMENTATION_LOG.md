@@ -26,7 +26,7 @@ commit that contains the implementation.
 | 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
 | 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
 | 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
-| 78.2 — Pishro Kaman official UI adapter | In progress — runtime validation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa` |
+| 78.2 — Pishro Kaman official UI adapter | In progress — runtime validation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655` |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
@@ -441,6 +441,9 @@ runtime validation pending
 **Implementation commit:** `8753f08b81ebb389404fae9fd81092dc46c9d6aa`
 (`Enable Pishro order workflow controls`)
 
+**Runtime-fix commit:** `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`
+(`Discover Pishro ISIN from active form`)
+
 ### Delivered changes
 
 - Removed the permanent Pishro capability gate that disabled every order-workflow control.
@@ -456,11 +459,16 @@ runtime validation pending
   accidental reuse of EasyTrader scripts for Pishro.
 - Added a separate Pishro Kaman adapter for open/read/ensure/prepare/submit/atomic-submit/clear
   operations through the official visible UI.
-- Required Pishro's exact HTTPS origin, a valid ISIN in the official route, an unambiguous visible
-  price input, quantity input, commission, total value, and buy action before the workflow can
-  advance.
+- Required Pishro's exact HTTPS origin, one unambiguous active ISIN, an unambiguous visible price
+  input, quantity input, commission, total value, and buy action before the workflow can advance.
+- Expanded active-instrument discovery after runtime evidence showed that Pishro removes the ISIN
+  from `pathname` after navigation: the adapter now checks the full URL, attributes and short
+  visible text in the located order form, and explicit active/selected element metadata in that
+  priority order.
+- Added a distinct `INSTRUMENT_AMBIGUOUS` stop result when a selected source exposes more than one
+  ISIN; the adapter never chooses the first candidate silently.
 - Bound Pishro preparation and final submission through the existing per-attempt nonce and
-  revalidated route ISIN, price, quantity, and action immediately before a single official click.
+  revalidated active ISIN, price, quantity, and action immediately before a single official click.
 - Used a successful read of the visible form on the exact trusted Pishro origin as non-sensitive
   broker-access evidence; no credential value is inspected.
 - Generalized user-facing official-UI error messages to identify the selected broker rather than
@@ -485,8 +493,8 @@ runtime validation pending
 - TSETMC exchange-clock scheduling, one-second slots, missed-slot no-burst behavior, Prime Until
   Ready, the global next-due queue, the central dispatcher, and sent/in-flight accounting remain
   unchanged.
-- Pishro multi-symbol switching is not guessed; if the confirmed route ISIN is not active, the
-  operation stops.
+- Pishro multi-symbol switching is not guessed; if exactly one active ISIN cannot be proven or it
+  differs from the confirmed snapshot, the operation stops.
 - No live order was sent during this implementation or verification.
 
 ### Verification
@@ -502,6 +510,12 @@ runtime validation pending
   while Prepare and Add to Schedule correctly remain disabled before form confirmation.
 - The smoke test did not interact with the Pishro webpage and closed the test application after
   inspecting control state.
+- The first logged-in runtime attempt failed safely with `INSTRUMENT_NOT_VERIFIED` and explicitly
+  reported `HTTP POST: NOT SENT`; this evidence identified the obsolete pathname-only assumption.
+- Updated Debug and Release builds passed in isolated temporary output folders while the user's
+  currently running Debug executable remained untouched.
+- A generated-script probe confirmed full-URL, order-form, and active-selection ISIN discovery,
+  explicit ambiguity handling, and removal of pathname-only discovery.
 - `git diff --check` passed before the implementation commit.
 
 ### Required runtime validation before completion
