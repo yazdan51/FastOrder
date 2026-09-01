@@ -444,6 +444,9 @@ runtime validation pending
 **Runtime-fix commit:** `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`
 (`Discover Pishro ISIN from active form`)
 
+**Probe-result fix commit:** `3c7e390`
+(`Parse Pishro compatibility probe objects`)
+
 ### Delivered changes
 
 - Removed the permanent Pishro capability gate that disabled every order-workflow control.
@@ -473,6 +476,9 @@ runtime validation pending
   broker-access evidence; no credential value is inspected.
 - Generalized user-facing official-UI error messages to identify the selected broker rather than
   incorrectly referring to EasyTrader.
+- Corrected the sanitized compatibility-probe parser so it accepts both direct JSON objects and
+  JSON-encoded strings returned by different WebView2 page contexts instead of reporting
+  `INVALID_RESULT` for a valid direct object.
 
 ### Changed files
 
@@ -516,11 +522,19 @@ runtime validation pending
   currently running Debug executable remained untouched.
 - A generated-script probe confirmed full-URL, order-form, and active-selection ISIN discovery,
   explicit ambiguity handling, and removal of pathname-only discovery.
+- Reflection checks against the built assembly confirmed that both direct-object and encoded-string
+  probe results deserialize as `PROBE_READY` with the exact trusted Pishro origin.
+- A post-restart probe returned `PROBE_READY` and safely reported the exact
+  `/trading-view/IRO9MSMI0D81` path with zero visible dialogs, inputs, or button actions while the
+  broker showed its pre-login/mobile-version landing content; no field value or credential data was
+  read and no HTTP POST was sent.
 - `git diff --check` passed before the implementation commit.
 
 ### Required runtime validation before completion
 
 - Sign in manually through the official Pishro page.
+- Confirm that the WebView has left the pre-login/mobile-version landing content before attempting
+  to open or read an order form.
 - Open one official buy form and enter a non-sensitive test price and quantity.
 - Run Read and Confirm, then a prepare-only Dry-Run; do not approve a live order for validation.
 - Record the sanitized status codes and confirm the exact DOM contract or tighten the adapter as

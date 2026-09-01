@@ -803,6 +803,10 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
 ### Stage 78.2 — Pishro Kaman official UI adapter
 
 - validate the logged-in Pishro DOM through sanitized structural evidence;
+- treat Pishro landing/pre-login content with no visible order controls as not ready and require the
+  user to complete official login manually before DOM validation;
+- accept both direct JSON objects and JSON-encoded strings from the read-only WebView2 compatibility
+  probe without weakening origin validation or reading field values;
 - implement separate Pishro open/read/prepare/verify/click scripts;
 - keep Open and Read enabled after Pishro selection, while Prepare and Add to Schedule remain
   disabled until a successful read and explicit local confirmation;
