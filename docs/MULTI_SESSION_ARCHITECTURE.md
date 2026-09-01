@@ -101,12 +101,14 @@ The application continues to use one shared WebView and one central dispatcher. 
 explicit multiple-WebView design is approved, concurrent sessions must belong to the currently
 selected broker; FastOrder must not navigate across brokers while a session is active.
 
-The current Pishro integration is deliberately staged. Stage 78.1 provides profile selection,
-official navigation, broker-bound snapshots/sessions, and a read-only structural compatibility
-probe. The probe may inspect only non-secret DOM structure and labels; it must not read field
-values, tokens, cookies, storage, request bodies, or headers, and it must not click or submit. The
-Pishro order adapter remains fail-closed until its logged-in DOM contract is validated in Stage
-78.2. No selector or endpoint may be guessed.
+The Pishro integration is deliberately staged. Stage 78.1 provides profile selection, official
+navigation, broker-bound snapshots/sessions, and a read-only structural compatibility probe. The
+probe may inspect only non-secret DOM structure and labels; it must not read field values, tokens,
+cookies, storage, request bodies, or headers, and it must not click or submit. Stage 78.2 adds a
+separate strict Pishro adapter and progressive control activation. The adapter accepts only an
+exact trusted origin, an ISIN in the official route, one unambiguous visible price/quantity pair,
+and one unambiguous official buy action. It remains fail-closed on any DOM ambiguity, and logged-in
+runtime validation is required before Stage 78.2 is marked complete. No private endpoint is guessed.
 
 ---
 
@@ -718,8 +720,9 @@ Non-negotiable:
 
 1. No direct broker API credentials are read or stored.
 2. No direct custom order POST is introduced.
-3. Final submission uses the selected broker's validated official UI adapter; the currently
-   operational adapter is EasyTrader, and Pishro remains fail-closed until Stage 78.2.
+3. Final submission uses the selected broker's official UI adapter. EasyTrader retains its
+   validated adapter; Pishro uses its separate strict adapter and fails closed unless every
+   required visible control, route ISIN, value, and preparation nonce is unambiguous.
 4. Symbol, ISIN, price, and quantity are revalidated immediately before every final click.
 5. Each session has independent sent/in-flight accounting.
 6. No session exceeds its configured total quantity.
@@ -800,6 +803,8 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
 
 - validate the logged-in Pishro DOM through sanitized structural evidence;
 - implement separate Pishro open/read/prepare/verify/click scripts;
+- keep Open and Read enabled after Pishro selection, while Prepare and Add to Schedule remain
+  disabled until a successful read and explicit local confirmation;
 - submit only through Pishro's official visible UI;
 - preserve the exchange-clock scheduler, Prime Until Ready, global queue, central dispatcher, and
   sent/in-flight accounting unchanged;

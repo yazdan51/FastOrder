@@ -26,7 +26,7 @@ commit that contains the implementation.
 | 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
 | 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
 | 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
-| 78.2 — Pishro Kaman official UI adapter | Awaiting logged-in DOM validation | — | — |
+| 78.2 — Pishro Kaman official UI adapter | In progress — runtime validation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa` |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
@@ -432,6 +432,85 @@ commit that contains the implementation.
 - A WPF UI Automation smoke check found the broker selector and compatibility-probe button in the
   ready main window; no WebView interaction was performed.
 - `git diff --check` passed before the implementation commit.
+
+## Stage 78.2 — Pishro Kaman official UI adapter
+
+**Status:** In progress; control lifecycle and strict adapter implemented on 2026-09-01, logged-in
+runtime validation pending
+
+**Implementation commit:** `8753f08b81ebb389404fae9fd81092dc46c9d6aa`
+(`Enable Pishro order workflow controls`)
+
+### Delivered changes
+
+- Removed the permanent Pishro capability gate that disabled every order-workflow control.
+- Enabled `Open current symbol form` and `Read and confirm form` immediately after Pishro is
+  selected and while no schedule or live submission is active.
+- Preserved progressive safety: `Prepare locally`, `Add to Schedule`, and Dry-Run remain disabled
+  until the visible official form is read successfully and the user explicitly confirms the
+  captured order.
+- Corrected the shared active-schedule control lifecycle so broker navigation, form mutation,
+  reload, and order setup stay disabled while a schedule is active and return to their valid
+  broker-specific states afterward.
+- Added `BrokerOfficialOrderUiBridge`, which selects exactly one broker adapter and prevents
+  accidental reuse of EasyTrader scripts for Pishro.
+- Added a separate Pishro Kaman adapter for open/read/ensure/prepare/submit/atomic-submit/clear
+  operations through the official visible UI.
+- Required Pishro's exact HTTPS origin, a valid ISIN in the official route, an unambiguous visible
+  price input, quantity input, commission, total value, and buy action before the workflow can
+  advance.
+- Bound Pishro preparation and final submission through the existing per-attempt nonce and
+  revalidated route ISIN, price, quantity, and action immediately before a single official click.
+- Used a successful read of the visible form on the exact trusted Pishro origin as non-sensitive
+  broker-access evidence; no credential value is inspected.
+- Generalized user-facing official-UI error messages to identify the selected broker rather than
+  incorrectly referring to EasyTrader.
+
+### Changed files
+
+- `BrokerOfficialOrderUiBridge.cs` (new)
+- `PishroKamanOrderUiBridge.cs` (new)
+- `BrokerProfile.cs`
+- `MainWindow.xaml.cs`
+- `OfficialOrderUiBridge.cs`
+
+### Preserved behavior and non-goals
+
+- EasyTrader retains its existing selectors and official-UI submission implementation.
+- The Pishro adapter does not reuse EasyTrader selectors and rejects ambiguous or missing DOM
+  structure before a final click.
+- No direct broker API order path was added.
+- No token, cookie, authorization value, request body, browser storage, or password is read or
+  stored.
+- TSETMC exchange-clock scheduling, one-second slots, missed-slot no-burst behavior, Prime Until
+  Ready, the global next-due queue, the central dispatcher, and sent/in-flight accounting remain
+  unchanged.
+- Pishro multi-symbol switching is not guessed; if the confirmed route ISIN is not active, the
+  operation stops.
+- No live order was sent during this implementation or verification.
+
+### Verification
+
+- Debug and Release builds passed with zero compilation errors.
+- The only build warning was `NU1900`, caused by the unavailable NuGet vulnerability feed.
+- A generated-script routing probe confirmed that the Pishro script contains only the Pishro
+  trusted origin and no EasyTrader order selector, while the EasyTrader script contains no Pishro
+  bridge state.
+- A static safety scan found no cookie, local/session storage, `fetch`, `XMLHttpRequest`,
+  authorization-value, or request-body access in the Pishro adapter.
+- A Windows UI Automation smoke test selected Pishro and confirmed that Open and Read are enabled,
+  while Prepare and Add to Schedule correctly remain disabled before form confirmation.
+- The smoke test did not interact with the Pishro webpage and closed the test application after
+  inspecting control state.
+- `git diff --check` passed before the implementation commit.
+
+### Required runtime validation before completion
+
+- Sign in manually through the official Pishro page.
+- Open one official buy form and enter a non-sensitive test price and quantity.
+- Run Read and Confirm, then a prepare-only Dry-Run; do not approve a live order for validation.
+- Record the sanitized status codes and confirm the exact DOM contract or tighten the adapter as
+  needed.
 
 ## Template for future stages
 
