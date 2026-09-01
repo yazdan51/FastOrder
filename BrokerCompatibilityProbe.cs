@@ -201,9 +201,15 @@ namespace FastOrder
 
             try
             {
+                using JsonDocument document =
+                    JsonDocument.Parse(
+                        json);
+
                 string normalizedJson =
-                    JsonSerializer.Deserialize<string>(json) ??
-                    json;
+                    document.RootElement.ValueKind ==
+                    JsonValueKind.String
+                        ? document.RootElement.GetString() ?? ""
+                        : document.RootElement.GetRawText();
 
                 return JsonSerializer.Deserialize<BrokerCompatibilityProbeResult>(
                     normalizedJson,
