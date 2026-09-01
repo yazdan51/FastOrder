@@ -62,18 +62,39 @@
             <Setter Property="Padding"
                     Value="6"/>
         </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="FontWeight"
+                    Value="SemiBold"/>
+            <Setter Property="Padding"
+                    Value="8,6"/>
+            <Setter Property="HorizontalContentAlignment"
+                    Value="Center"/>
+        </Style>
+
+        <Style TargetType="DataGridCell">
+            <Setter Property="Padding"
+                    Value="8,5"/>
+            <Setter Property="VerticalContentAlignment"
+                    Value="Center"/>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"
-                           MinHeight="300"/>
+                           MinHeight="220"/>
+            <RowDefinition Height="6"/>
+            <RowDefinition x:Name="SessionAreaRow"
+                           Height="150"
+                           MinHeight="120"
+                           MaxHeight="300"/>
             <RowDefinition Height="6"/>
             <RowDefinition x:Name="LogAreaRow"
-                           Height="230"
-                           MinHeight="150"
-                           MaxHeight="430"/>
+                           Height="190"
+                           MinHeight="120"
+                           MaxHeight="380"/>
         </Grid.RowDefinitions>
 
         <!-- HEADER -->
@@ -162,6 +183,112 @@
                         <TextBlock Text="فرم و سفارش"
                                    Style="{StaticResource SectionTitleStyle}"/>
 
+                        <Border Margin="0,0,0,10"
+                                Padding="10"
+                                Background="#FFF8FAFB"
+                                BorderBrush="#FFD7DDE3"
+                                BorderThickness="1"
+                                CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="تنظیم فعلی سفارش"
+                                           Margin="0,0,0,8"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FF263238"/>
+
+                                <TextBlock x:Name="CurrentSetupStateTextBlock"
+                                           Text="هنوز سفارشی خوانده و تأیید نشده است."
+                                           Margin="0,0,0,8"
+                                           TextWrapping="Wrap"
+                                           Foreground="#FF607D8B"
+                                           FontSize="12"/>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                               Grid.Column="0"
+                                               Text="نماد:"
+                                               Margin="0,2,0,2"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="CurrentSetupSymbolTextBlock"
+                                               Grid.Row="0"
+                                               Grid.Column="1"
+                                               Text="—"
+                                               Margin="8,2,0,2"
+                                               TextTrimming="CharacterEllipsis"/>
+
+                                    <TextBlock Grid.Row="1"
+                                               Grid.Column="0"
+                                               Text="ISIN:"
+                                               Margin="0,2,0,2"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="CurrentSetupIsinTextBlock"
+                                               Grid.Row="1"
+                                               Grid.Column="1"
+                                               Text="—"
+                                               Margin="8,2,0,2"
+                                               FlowDirection="LeftToRight"
+                                               TextAlignment="Right"/>
+
+                                    <TextBlock Grid.Row="2"
+                                               Grid.Column="0"
+                                               Text="قیمت:"
+                                               Margin="0,2,0,2"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="CurrentSetupPriceTextBlock"
+                                               Grid.Row="2"
+                                               Grid.Column="1"
+                                               Text="—"
+                                               Margin="8,2,0,2"/>
+
+                                    <TextBlock Grid.Row="3"
+                                               Grid.Column="0"
+                                               Text="تعداد کل:"
+                                               Margin="0,2,0,2"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="CurrentSetupQuantityTextBlock"
+                                               Grid.Row="3"
+                                               Grid.Column="1"
+                                               Text="—"
+                                               Margin="8,2,0,2"/>
+
+                                    <TextBlock Grid.Row="4"
+                                               Grid.Column="0"
+                                               Text="کارمزد:"
+                                               Margin="0,2,0,2"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="CurrentSetupCommissionTextBlock"
+                                               Grid.Row="4"
+                                               Grid.Column="1"
+                                               Text="—"
+                                               Margin="8,2,0,2"/>
+
+                                    <TextBlock Grid.Row="5"
+                                               Grid.Column="0"
+                                               Text="ارزش نهایی:"
+                                               Margin="0,2,0,2"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="CurrentSetupTotalValueTextBlock"
+                                               Grid.Row="5"
+                                               Grid.Column="1"
+                                               Text="—"
+                                               Margin="8,2,0,2"
+                                               FontWeight="SemiBold"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
                         <Button x:Name="PreviewOrderButton"
                                 Content="باز کردن فرم نماد جاری"
                                 Style="{StaticResource ControlButtonStyle}"
@@ -183,7 +310,7 @@
                                 Click="PrepareOrderButton_Click"/>
 
                         <Button x:Name="SendLiveOrderButton"
-                                Content="زمان‌بندی ارسال واقعی"
+                                Content="افزودن به زمان‌بندی"
                                 Style="{StaticResource ControlButtonStyle}"
                                 IsEnabled="False"
                                 Background="#FFC62828"
@@ -286,11 +413,128 @@
                       ResizeBehavior="PreviousAndNext"
                       ShowsPreview="True"
                       Background="Transparent"
+                      ToolTip="برای تغییر ارتفاع فهرست نشست‌ها بکشید"/>
+
+        <!-- ORDER SESSIONS -->
+
+        <Border Grid.Row="3"
+                Margin="0,4,0,0"
+                Style="{StaticResource PanelBorderStyle}"
+                ClipToBounds="True">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0"
+                      Margin="12,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0"
+                               Text="نشست‌های سفارش"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="#FF263238"/>
+
+                    <TextBlock Grid.Column="1"
+                               Text="Stage 75 — فعلاً فقط یک نشست هم‌زمان اجرا می‌شود"
+                               HorizontalAlignment="Right"
+                               FlowDirection="RightToLeft"
+                               Foreground="#FF607D8B"
+                               FontSize="12"/>
+                </Grid>
+
+                <DataGrid x:Name="SessionDataGrid"
+                          Grid.Row="1"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserResizeRows="False"
+                          EnableRowVirtualization="True"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          BorderThickness="0,1,0,0"
+                          BorderBrush="#FFD7DDE3"
+                          RowHeaderWidth="0"
+                          AlternatingRowBackground="#FFF8FAFB"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto"
+                          FlowDirection="RightToLeft"
+                          SelectionMode="Single"
+                          SelectionUnit="FullRow">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="#"
+                                            Binding="{Binding CreationSequence}"
+                                            Width="48"/>
+                        <DataGridTextColumn Header="نماد"
+                                            Binding="{Binding SymbolName}"
+                                            MinWidth="145"
+                                            Width="1.4*"/>
+                        <DataGridTextColumn Header="وضعیت"
+                                            Binding="{Binding StateDisplay}"
+                                            MinWidth="105"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="کل"
+                                            Binding="{Binding TotalQuantityDisplay}"
+                                            MinWidth="78"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="ارسال‌شده"
+                                            Binding="{Binding SentQuantityDisplay}"
+                                            MinWidth="88"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="درحال ارسال"
+                                            Binding="{Binding InFlightQuantityDisplay}"
+                                            MinWidth="90"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="باقی‌مانده"
+                                            Binding="{Binding RemainingQuantityDisplay}"
+                                            MinWidth="88"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="سقف"
+                                            Binding="{Binding MaxQuantityPerOrderDisplay}"
+                                            MinWidth="70"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="شروع"
+                                            Binding="{Binding StartTimeDisplay}"
+                                            MinWidth="78"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="بعدی"
+                                            Binding="{Binding NextDueDisplay}"
+                                            MinWidth="100"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="HTTP"
+                                            Binding="{Binding LastHttpStatusDisplay}"
+                                            MinWidth="64"
+                                            Width="Auto"/>
+                        <DataGridTextColumn Header="آخرین وضعیت"
+                                            Binding="{Binding LastStatus}"
+                                            MinWidth="180"
+                                            Width="2*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </Border>
+
+        <GridSplitter Grid.Row="4"
+                      Height="6"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      ResizeDirection="Rows"
+                      ResizeBehavior="PreviousAndNext"
+                      ShowsPreview="True"
+                      Background="Transparent"
                       ToolTip="برای تغییر ارتفاع گزارش‌ها بکشید"/>
 
         <!-- LOG AREA -->
 
-        <Grid Grid.Row="3"
+        <Grid Grid.Row="5"
               Margin="0,4,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="1.65*"

@@ -1,7 +1,9 @@
 ﻿
 using Microsoft.Web.WebView2.Core;
 using System;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -44,6 +46,11 @@ namespace FastOrder
         private bool _successfulSessionResponseObserved = false;
         private bool _successfulProtectedApiResponseObserved = false;
         private ConfirmedOrderSnapshot? _confirmedOrderSnapshot;
+        private readonly ObservableCollection<OrderSession> _orderSessions =
+            new ObservableCollection<OrderSession>();
+        private long _nextOrderSessionSequence = 0;
+        private OrderSession? _activeOrderSession;
+        private bool _hasCurrentOrderSetup = false;
         private bool _liveSubmissionInProgress = false;
         private bool _liveOrderRequestObserved = false;
         private string? _activeLiveSubmissionId;
@@ -90,6 +97,9 @@ namespace FastOrder
         public MainWindow()
         {
             InitializeComponent();
+
+            SessionDataGrid.ItemsSource =
+                _orderSessions;
 
             RestoreWindowLayout();
 
@@ -573,6 +583,9 @@ namespace FastOrder
                 PrepareOrderButton.IsEnabled = true;
                 PrepareOrderButton.Content = "آماده‌سازی محلی";
 
+                UpdateCurrentOrderSetup(
+                    payload.Order);
+
                 WriteImportant("");
                 WriteImportant("========================================");
                 WriteImportant("ORDER READ FROM EASYTRADER FORM");
@@ -590,7 +603,7 @@ namespace FastOrder
 
                 PrepareOrderButton_Click(PrepareOrderButton, new RoutedEventArgs());
 
-                SetStatus("فرم خوانده و تأیید شد؛ اگر LOCALLY READY است، «زمان‌بندی ارسال واقعی» را بزنید.");
+                SetStatus("فرم خوانده و تأیید شد؛ اگر LOCALLY READY است، «افزودن به زمان‌بندی» را بزنید.");
             }
             catch (Exception ex)
             {
@@ -1448,6 +1461,9 @@ namespace FastOrder
             SendLiveOrderButton.IsEnabled =
                 true;
 
+            OrderSession? createdSession =
+                null;
+
             try
             {
                 // Payload از Snapshot تأییدشده بازسازی و دوباره مستقل
@@ -1547,6 +1563,36 @@ namespace FastOrder
                     return;
                 }
 
+                long creationSequence =
+                    checked(
+                        ++_nextOrderSessionSequence);
+
+                createdSession =
+                    new OrderSession(
+                        creationSequence,
+                        order,
+                        confirmationWindow.MaxQuantityPerOrder,
+                        confirmationWindow.ScheduledStartAt,
+                        confirmationWindow.ScheduledEndAt,
+                        snapshot);
+
+                createdSession.SetState(
+                    OrderSessionState.Waiting,
+                    "به زمان‌بندی افزوده شد");
+
+                _orderSessions.Insert(
+                    0,
+                    createdSession);
+
+                SessionDataGrid.SelectedItem =
+                    createdSession;
+
+                SessionDataGrid.ScrollIntoView(
+                    createdSession);
+
+                _activeOrderSession =
+                    createdSession;
+
                 // از این نقطه به بعد، چرخه زمان‌بندی مالک کامل وضعیت ارسال است.
                 await RunScheduledOrderAsync(
                     coreWebView,
@@ -1554,10 +1600,16 @@ namespace FastOrder
                     order,
                     confirmationWindow.ScheduledStartAt,
                     confirmationWindow.ScheduledEndAt,
-                    confirmationWindow.MaxQuantityPerOrder);
+                    confirmationWindow.MaxQuantityPerOrder,
+                    createdSession);
             }
             catch (Exception)
             {
+                createdSession?.SetState(
+                    OrderSessionState.Failed,
+                    "خطای داخلی پیش از اجرای کامل نشست",
+                    "مسیر کنترل‌شده پیش از تکمیل نشست متوقف شد.");
+
                 ResetLiveSubmissionTracking();
 
                 WriteLiveSubmissionBlocked(
@@ -1583,10 +1635,19 @@ namespace FastOrder
             Order order,
             DateTimeOffset startAt,
             DateTimeOffset endAt,
-            long maxQuantityPerOrder)
+            long maxQuantityPerOrder,
+            OrderSession session)
         {
+            ArgumentNullException.ThrowIfNull(
+                session);
+
             if (endAt <= startAt)
             {
+                session.SetState(
+                    OrderSessionState.Failed,
+                    "بازه زمانی نامعتبر",
+                    "ساعت پایان باید بعد از ساعت شروع باشد.");
+
                 WriteLiveSubmissionBlocked(
                     "بازه زمانی ارسال معتبر نیست.");
 
@@ -1596,6 +1657,11 @@ namespace FastOrder
             if (maxQuantityPerOrder <= 0 ||
                 maxQuantityPerOrder > order.Quantity)
             {
+                session.SetState(
+                    OrderSessionState.Failed,
+                    "سقف هر سفارش نامعتبر است",
+                    "سقف هر سفارش باید مثبت و حداکثر برابر حجم کل باشد.");
+
                 WriteLiveSubmissionBlocked(
                     "حداکثر حجم هر سفارش معتبر نیست.");
 
@@ -1635,6 +1701,42 @@ namespace FastOrder
             System.Collections.Generic.List<Task>
                 activeDispatchTasks =
                     new System.Collections.Generic.List<Task>();
+
+            void UpdateSessionProgress(
+                DateTimeOffset? nextDueAt,
+                string status)
+            {
+                long sentSnapshot;
+                long inFlightSnapshot;
+                int clickedSnapshot;
+
+                lock (accountingLock)
+                {
+                    sentSnapshot =
+                        sentQuantity;
+
+                    inFlightSnapshot =
+                        inFlightQuantity;
+
+                    clickedSnapshot =
+                        clickedOrderCount;
+                }
+
+                session.UpdateProgress(
+                    sentSnapshot,
+                    inFlightSnapshot,
+                    clickedSnapshot,
+                    nextDueAt,
+                    status);
+            }
+
+            session.SetState(
+                OrderSessionState.Waiting,
+                "در انتظار شروع بازه");
+
+            UpdateSessionProgress(
+                startAt,
+                "در انتظار شروع بازه");
 
             WriteImportant("");
             WriteImportant(
@@ -1700,6 +1802,10 @@ namespace FastOrder
                 if (DateTimeOffset.Now <
                     endAt)
                 {
+                    session.SetState(
+                        OrderSessionState.PreWarming,
+                        "در حال آماده‌سازی فرم رسمی");
+
                     string preWarmNonce =
                         Guid.NewGuid()
                             .ToString(
@@ -1740,6 +1846,11 @@ namespace FastOrder
                         if (!preWarmResult.HasStatus(
                             OfficialOrderUiBridge.PreparedStatus))
                         {
+                            session.SetState(
+                                OrderSessionState.Failed,
+                                "پیش‌آماده‌سازی ناموفق بود",
+                                "فرم رسمی خرید قبل از اولین اسلات آماده نشد.");
+
                             WriteScheduledOrderStopped(
                                 "فرم رسمی خرید قبل از شروع زمان‌بندی آماده نشد.",
                                 "PRE-WARM FAILED BEFORE FIRST SLOT");
@@ -1751,8 +1862,12 @@ namespace FastOrder
                     {
                         await TryClearOfficialPreparedStateAsync(
                             coreWebView,
-                            preWarmNonce);
+                                preWarmNonce);
                     }
+
+                    session.SetState(
+                        OrderSessionState.Ready,
+                        "فرم رسمی برای اولین اسلات آماده است");
                 }
 
                 DateTimeOffset nextSlot =
@@ -1793,6 +1908,11 @@ namespace FastOrder
                         snapshot) ||
                         !snapshot.HasValidFingerprint())
                     {
+                        session.SetState(
+                            OrderSessionState.Failed,
+                            "Snapshot تأییدشده تغییر کرده است",
+                            "اجرای نشست پیش از اسلات بعدی متوقف شد.");
+
                         WriteScheduledOrderStopped(
                             "سفارش تأییدشده تغییر کرده است.",
                             "STOPPED BEFORE NEXT SLOT");
@@ -1837,6 +1957,24 @@ namespace FastOrder
 
                         long capturedQuantity =
                             currentQuantity;
+
+                        DateTimeOffset capturedNextDueAt =
+                            nextSlot +
+                            ScheduledOrderRetryDelay;
+
+                        session.SetState(
+                            OrderSessionState.Running,
+                            "اسلات " +
+                            capturedSlotNumber +
+                            " در حال اجرا است");
+
+                        UpdateSessionProgress(
+                            nextSlot,
+                            "حجم " +
+                            capturedQuantity +
+                            " برای اسلات " +
+                            capturedSlotNumber +
+                            " رزرو شد");
 
                         Order currentOrder =
                             CreateScheduledSliceOrder(
@@ -1884,6 +2022,12 @@ namespace FastOrder
 
                                         clickedOrderCount++;
                                     }
+
+                                    UpdateSessionProgress(
+                                        capturedNextDueAt,
+                                        "اسلات " +
+                                        capturedSlotNumber +
+                                        " با کلیک رسمی ثبت شد");
                                 },
                                 onNotClicked: quantity =>
                                 {
@@ -1894,6 +2038,12 @@ namespace FastOrder
                                                 inFlightQuantity -
                                                 quantity);
                                     }
+
+                                    UpdateSessionProgress(
+                                        capturedNextDueAt,
+                                        "اسلات " +
+                                        capturedSlotNumber +
+                                        " کلیک نشد؛ رزرو آزاد شد");
                                 });
 
                         activeDispatchTasks.Add(
@@ -1923,6 +2073,10 @@ namespace FastOrder
                         WriteImportant(
                             "IN-FLIGHT: " +
                             inFlightSnapshot);
+
+                        UpdateSessionProgress(
+                            nextSlot,
+                            "حجم آزاد برای اسلات جدید وجود ندارد");
                     }
 
                     bool allQuantityAccounted;
@@ -2015,6 +2169,28 @@ namespace FastOrder
                 WriteImportant(
                     "========================================");
 
+                if (session.State ==
+                    OrderSessionState.Failed)
+                {
+                    UpdateSessionProgress(
+                        null,
+                        session.LastStatus);
+                }
+                else
+                {
+                    UpdateSessionProgress(
+                        null,
+                        finalSent == totalQuantity
+                            ? "کل حجم از مسیر رسمی کلیک شد"
+                            : "بازه پایان یافت و بخشی از حجم باقی ماند");
+
+                    session.SetState(
+                        OrderSessionState.Completed,
+                        finalSent == totalQuantity
+                            ? "کل حجم از مسیر رسمی کلیک شد؛ نتیجه کارگزاری را بررسی کنید"
+                            : "بازه پایان یافت؛ بخشی از حجم ارسال نشد");
+                }
+
                 SetStatus(
                     finalSent == totalQuantity
                         ? "کل حجم از طریق کلیک رسمی ارسال شد؛ نتیجه سفارش‌ها را در EasyTrader بررسی کنید."
@@ -2061,6 +2237,14 @@ namespace FastOrder
                 WriteImportant(
                     "CANCEL FINAL IN-FLIGHT QUANTITY: " +
                     canceledInFlight);
+
+                UpdateSessionProgress(
+                    null,
+                    "لغو شد؛ dispatchهای شروع‌شده تعیین تکلیف شدند");
+
+                session.SetState(
+                    OrderSessionState.Canceled,
+                    "توسط کاربر لغو شد");
 
                 WriteScheduledOrderStopped(
                     "زمان‌بندی توسط کاربر لغو شد؛ slot جدید ایجاد نشد و dispatchهای قبلاً شروع‌شده تعیین تکلیف شدند.",
@@ -2113,6 +2297,15 @@ namespace FastOrder
                     "INTERNAL ERROR FINAL IN-FLIGHT QUANTITY: " +
                     errorInFlight);
 
+                UpdateSessionProgress(
+                    null,
+                    "خطای داخلی؛ dispatchهای شروع‌شده تعیین تکلیف شدند");
+
+                session.SetState(
+                    OrderSessionState.Failed,
+                    "خطای داخلی در اجرای نشست",
+                    ex.Message);
+
                 WriteScheduledOrderStopped(
                     "خطای داخلی رخ داد؛ slot جدید متوقف شد و dispatchهای قبلاً شروع‌شده تعیین تکلیف شدند.",
                     "STOPPED ON INTERNAL ERROR");
@@ -2131,6 +2324,14 @@ namespace FastOrder
 
                 _scheduledOrderActive =
                     false;
+
+                if (ReferenceEquals(
+                    _activeOrderSession,
+                    session))
+                {
+                    _activeOrderSession =
+                        null;
+                }
 
                 ClearConfirmedOrder();
 
@@ -3216,6 +3417,9 @@ namespace FastOrder
                 completionSource =
                     _activeLiveSubmissionCompletion;
 
+            _activeOrderSession?.SetLastHttpStatus(
+                status);
+
             // ابتدا قفل تلاش آزاد می‌شود؛ سپس completionSource محلی نتیجه را
             // به چرخه زمان‌بندی تحویل می‌دهد.
             ResetLiveSubmissionTracking();
@@ -3305,6 +3509,67 @@ namespace FastOrder
 
             SendLiveOrderButton.IsEnabled =
                 false;
+
+            if (_hasCurrentOrderSetup)
+            {
+                CurrentSetupStateTextBlock.Text =
+                    "مقادیر حفظ شده‌اند؛ برای زمان‌بندی بعدی فرم رسمی را دوباره بخوانید و تأیید کنید.";
+
+                CurrentSetupStateTextBlock.Foreground =
+                    System.Windows.Media.Brushes.DarkOrange;
+            }
+        }
+
+        private void UpdateCurrentOrderSetup(
+            Order order)
+        {
+            ArgumentNullException.ThrowIfNull(
+                order);
+
+            _hasCurrentOrderSetup =
+                true;
+
+            CurrentSetupSymbolTextBlock.Text =
+                order.SymbolName;
+
+            CurrentSetupIsinTextBlock.Text =
+                order.SymbolIsin;
+
+            CurrentSetupPriceTextBlock.Text =
+                order.Price.ToString(
+                    "N0",
+                    CultureInfo.InvariantCulture);
+
+            CurrentSetupQuantityTextBlock.Text =
+                order.Quantity.ToString(
+                    "N0",
+                    CultureInfo.InvariantCulture);
+
+            long grossValue =
+                checked(
+                    order.Price *
+                    order.Quantity);
+
+            long commissionAmount =
+                checked(
+                    order.TotalValue -
+                    grossValue);
+
+            CurrentSetupCommissionTextBlock.Text =
+                commissionAmount.ToString(
+                    "N0",
+                    CultureInfo.InvariantCulture);
+
+            CurrentSetupTotalValueTextBlock.Text =
+                order.TotalValue.ToString(
+                    "N0",
+                    CultureInfo.InvariantCulture);
+
+            CurrentSetupStateTextBlock.Text =
+                "خوانده و تأیید شده از فرم رسمی EasyTrader";
+
+            CurrentSetupStateTextBlock.Foreground =
+                System.Windows.Media.Brushes.Teal;
         }
 
         private static string SanitizeUrl(
