@@ -1,4 +1,4 @@
-﻿<Window x:Class="FastOrder.MainWindow"
+<Window x:Class="FastOrder.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -6,173 +6,303 @@
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="FastOrder"
-        Height="950"
-        Width="1450">
+        Width="1280"
+        Height="720"
+        MinWidth="1040"
+        MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Background="#FFF3F5F7"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
 
-    <Grid Margin="10">
+    <Window.Resources>
+        <Style x:Key="SectionTitleStyle"
+               TargetType="TextBlock">
+            <Setter Property="Margin"
+                    Value="0,2,0,10"/>
+            <Setter Property="FontSize"
+                    Value="14"/>
+            <Setter Property="FontWeight"
+                    Value="SemiBold"/>
+            <Setter Property="Foreground"
+                    Value="#FF263238"/>
+        </Style>
 
+        <Style x:Key="ControlButtonStyle"
+               TargetType="Button">
+            <Setter Property="MinHeight"
+                    Value="38"/>
+            <Setter Property="Margin"
+                    Value="0,0,0,8"/>
+            <Setter Property="Padding"
+                    Value="12,6"/>
+            <Setter Property="HorizontalContentAlignment"
+                    Value="Center"/>
+            <Setter Property="VerticalContentAlignment"
+                    Value="Center"/>
+        </Style>
+
+        <Style x:Key="PanelBorderStyle"
+               TargetType="Border">
+            <Setter Property="Background"
+                    Value="White"/>
+            <Setter Property="BorderBrush"
+                    Value="#FFD7DDE3"/>
+            <Setter Property="BorderThickness"
+                    Value="1"/>
+            <Setter Property="CornerRadius"
+                    Value="6"/>
+        </Style>
+
+        <Style TargetType="GroupBox">
+            <Setter Property="Background"
+                    Value="White"/>
+            <Setter Property="BorderBrush"
+                    Value="#FFD7DDE3"/>
+            <Setter Property="Padding"
+                    Value="6"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="330"/>
+            <RowDefinition Height="*"
+                           MinHeight="300"/>
+            <RowDefinition Height="6"/>
+            <RowDefinition x:Name="LogAreaRow"
+                           Height="230"
+                           MinHeight="150"
+                           MaxHeight="430"/>
         </Grid.RowDefinitions>
 
+        <!-- HEADER -->
 
-        <!-- TOP BAR -->
+        <Border Grid.Row="0"
+                Margin="0,0,0,10"
+                Padding="14,10"
+                Style="{StaticResource PanelBorderStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
 
-        <Grid Grid.Row="0"
-              Margin="0,0,0,10">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
+                <StackPanel Grid.Column="0"
+                            Margin="0,0,24,0">
+                    <TextBlock Text="FastOrder"
+                               FontSize="21"
+                               FontWeight="SemiBold"
+                               Foreground="#FF17212B"/>
+                    <TextBlock Text="مسیر رسمی EasyTrader"
+                               Margin="0,2,0,0"
+                               FlowDirection="RightToLeft"
+                               Foreground="#FF607D8B"
+                               FontSize="12"/>
+                </StackPanel>
 
-            <WrapPanel Grid.Row="0">
+                <TextBlock x:Name="StatusTextBlock"
+                           Grid.Column="1"
+                           Text="در حال آماده‌سازی..."
+                           FlowDirection="RightToLeft"
+                           HorizontalAlignment="Stretch"
+                           VerticalAlignment="Center"
+                           TextAlignment="Right"
+                           TextWrapping="Wrap"
+                           FontSize="15"
+                           Foreground="#FF263238"/>
+            </Grid>
+        </Border>
 
-            <Button x:Name="LoginButton"
-                    Content="ورود به EasyTrader"
-                    Width="160"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    Click="LoginButton_Click"/>
+        <!-- RESPONSIVE CONTROL PANEL + WEBVIEW -->
 
-            <Button x:Name="MonitoringButton"
-                    Content="فعال‌سازی Monitoring"
-                    Width="170"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    Click="MonitoringButton_Click"/>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="ControlPanelColumn"
+                                  Width="300"
+                                  MinWidth="260"
+                                  MaxWidth="440"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*"
+                                  MinWidth="460"/>
+            </Grid.ColumnDefinitions>
 
-            <Button x:Name="LoginStatusButton"
-                    Content="وضعیت ورود"
-                    Width="120"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    Click="LoginStatusButton_Click"/>
+            <Border Grid.Column="0"
+                    Padding="12"
+                    Style="{StaticResource PanelBorderStyle}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              CanContentScroll="True">
+                    <StackPanel FlowDirection="RightToLeft">
+                        <TextBlock Text="اتصال و نشست"
+                                   Style="{StaticResource SectionTitleStyle}"/>
 
-            <Button x:Name="PreviewOrderButton"
-                    Content="باز کردن فرم نماد جاری"
-                    Width="185"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    ToolTip="فرم رسمی خرید نماد جاری EasyTrader را باز می‌کند؛ ارسال انجام نمی‌شود."
-                    Click="PreviewOrderButton_Click"/>
+                        <Button x:Name="LoginButton"
+                                Content="ورود به EasyTrader"
+                                Style="{StaticResource ControlButtonStyle}"
+                                Click="LoginButton_Click"/>
 
-            <Button x:Name="ReadOrderFormButton"
-                    Content="خواندن و تأیید فرم"
-                    Width="165"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    IsEnabled="False"
-                    ToolTip="نماد، ISIN، قیمت و تعداد را از فرم رسمی می‌خواند؛ ارسال انجام نمی‌شود."
-                    Click="ReadOrderFormButton_Click"/>
+                        <Button x:Name="MonitoringButton"
+                                Content="فعال‌سازی Monitoring"
+                                Style="{StaticResource ControlButtonStyle}"
+                                Click="MonitoringButton_Click"/>
 
-            <Button x:Name="PrepareOrderButton"
-                    Content="آماده‌سازی محلی"
-                    Width="155"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    IsEnabled="False"
-                    ToolTip="Payload و ترافیک طبیعی سایت را کنترل می‌کند؛ هیچ سفارشی ارسال نمی‌شود."
-                    Click="PrepareOrderButton_Click"/>
+                        <Button x:Name="LoginStatusButton"
+                                Content="وضعیت ورود"
+                                Style="{StaticResource ControlButtonStyle}"
+                                Click="LoginStatusButton_Click"/>
 
-            <Button x:Name="SendLiveOrderButton"
-                    Content="زمان‌بندی ارسال واقعی"
-                    Width="185"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    IsEnabled="False"
-                    Background="#FFC62828"
-                    Foreground="White"
-                    FontWeight="SemiBold"
-                    ToolTip="پس از تأیید نهایی، در بازه تعیین‌شده تا اولین پاسخ موفق تلاش می‌کند."
-                    Click="SendLiveOrderButton_Click"/>
+                        <Button x:Name="ReloadButton"
+                                Content="بارگذاری مجدد"
+                                Style="{StaticResource ControlButtonStyle}"
+                                Click="ReloadButton_Click"/>
 
-            <Button x:Name="CancelScheduledOrderButton"
-                    Content="لغو زمان‌بندی"
-                    Width="135"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    IsEnabled="False"
-                    Background="#FF616161"
-                    Foreground="White"
-                    ToolTip="تلاش‌های بعدی را لغو می‌کند؛ عملیات ارسال‌شده قابل بازگردانی نیست."
-                    Click="CancelScheduledOrderButton_Click"/>
+                        <Separator Margin="0,5,0,10"/>
 
-            <Button x:Name="WebViewTimingTestButton"
-                    Content="تست زمان‌بندی WebView2"
-                    Width="180"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    ToolTip="فقط زمان اجرای JavaScript را اندازه‌گیری می‌کند؛ هیچ کلیک، POST یا تغییر فرم انجام نمی‌شود."
-                    Click="WebViewTimingTestButton_Click"/>
+                        <TextBlock Text="فرم و سفارش"
+                                   Style="{StaticResource SectionTitleStyle}"/>
 
-            <Button x:Name="OrderUiDryRunTimingButton"
-                    Content="Dry-Run فرم سفارش"
-                    Width="165"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    ToolTip="فرم رسمی را پیدا و قیمت/تعداد تأییدشده را تنظیم می‌کند، اما دکمه ارسال خرید را هرگز کلیک نمی‌کند."
-                    Click="OrderUiDryRunTimingButton_Click"/>
+                        <Button x:Name="PreviewOrderButton"
+                                Content="باز کردن فرم نماد جاری"
+                                Style="{StaticResource ControlButtonStyle}"
+                                ToolTip="فرم رسمی خرید نماد جاری EasyTrader را باز می‌کند؛ ارسال انجام نمی‌شود."
+                                Click="PreviewOrderButton_Click"/>
 
-            <Button x:Name="PauseButton"
-                    Content="Pause Log"
-                    Width="110"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    Click="PauseButton_Click"/>
+                        <Button x:Name="ReadOrderFormButton"
+                                Content="خواندن و تأیید فرم"
+                                Style="{StaticResource ControlButtonStyle}"
+                                IsEnabled="False"
+                                ToolTip="نماد، ISIN، قیمت و تعداد را از فرم رسمی می‌خواند؛ ارسال انجام نمی‌شود."
+                                Click="ReadOrderFormButton_Click"/>
 
-            <Button x:Name="ClearButton"
-                    Content="Clear Log"
-                    Width="110"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    Click="ClearButton_Click"/>
+                        <Button x:Name="PrepareOrderButton"
+                                Content="آماده‌سازی محلی"
+                                Style="{StaticResource ControlButtonStyle}"
+                                IsEnabled="False"
+                                ToolTip="Payload و ترافیک طبیعی سایت را کنترل می‌کند؛ هیچ سفارشی ارسال نمی‌شود."
+                                Click="PrepareOrderButton_Click"/>
 
-            <Button x:Name="ReloadButton"
-                    Content="بارگذاری مجدد"
-                    Width="130"
-                    Height="36"
-                    Margin="0,0,10,0"
-                    Click="ReloadButton_Click"/>
+                        <Button x:Name="SendLiveOrderButton"
+                                Content="زمان‌بندی ارسال واقعی"
+                                Style="{StaticResource ControlButtonStyle}"
+                                IsEnabled="False"
+                                Background="#FFC62828"
+                                BorderBrush="#FFB71C1C"
+                                Foreground="White"
+                                FontWeight="SemiBold"
+                                ToolTip="پس از تأیید نهایی، در بازه تعیین‌شده تا اولین پاسخ موفق تلاش می‌کند."
+                                Click="SendLiveOrderButton_Click"/>
 
-            </WrapPanel>
+                        <Button x:Name="CancelScheduledOrderButton"
+                                Content="لغو زمان‌بندی"
+                                Style="{StaticResource ControlButtonStyle}"
+                                IsEnabled="False"
+                                Background="#FF616161"
+                                BorderBrush="#FF424242"
+                                Foreground="White"
+                                ToolTip="تلاش‌های بعدی را لغو می‌کند؛ عملیات ارسال‌شده قابل بازگردانی نیست."
+                                Click="CancelScheduledOrderButton_Click"/>
 
-            <TextBlock x:Name="StatusTextBlock"
-                       Grid.Row="1"
-                       Text="در حال آماده‌سازی..."
-                       VerticalAlignment="Center"
-                       Margin="0,8,0,0"
-                       FontSize="15"/>
+                        <Separator Margin="0,5,0,10"/>
 
+                        <TextBlock Text="ابزارهای بررسی"
+                                   Style="{StaticResource SectionTitleStyle}"/>
+
+                        <Button x:Name="WebViewTimingTestButton"
+                                Content="تست زمان‌بندی WebView2"
+                                Style="{StaticResource ControlButtonStyle}"
+                                ToolTip="فقط زمان اجرای JavaScript را اندازه‌گیری می‌کند؛ هیچ کلیک، POST یا تغییر فرم انجام نمی‌شود."
+                                Click="WebViewTimingTestButton_Click"/>
+
+                        <Button x:Name="OrderUiDryRunTimingButton"
+                                Content="Dry-Run فرم سفارش"
+                                Style="{StaticResource ControlButtonStyle}"
+                                ToolTip="فرم رسمی را پیدا و قیمت/تعداد تأییدشده را تنظیم می‌کند، اما دکمه ارسال خرید را هرگز کلیک نمی‌کند."
+                                Click="OrderUiDryRunTimingButton_Click"/>
+
+                        <Separator Margin="0,5,0,10"/>
+
+                        <TextBlock Text="نمایش گزارش"
+                                   Style="{StaticResource SectionTitleStyle}"/>
+
+                        <Button x:Name="PauseButton"
+                                Content="Pause Log"
+                                Style="{StaticResource ControlButtonStyle}"
+                                Click="PauseButton_Click"/>
+
+                        <Button x:Name="ClearButton"
+                                Content="Clear Log"
+                                Style="{StaticResource ControlButtonStyle}"
+                                Click="ClearButton_Click"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <GridSplitter Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"
+                          ShowsPreview="True"
+                          Background="Transparent"
+                          ToolTip="برای تغییر عرض پنل کنترل بکشید"/>
+
+            <Border Grid.Column="2"
+                    Style="{StaticResource PanelBorderStyle}"
+                    ClipToBounds="True">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0"
+                            Padding="12,8"
+                            Background="#FFF8FAFB"
+                            BorderBrush="#FFD7DDE3"
+                            BorderThickness="0,0,0,1">
+                        <TextBlock Text="EasyTrader"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FF263238"/>
+                    </Border>
+
+                    <wv2:WebView2 x:Name="Browser"
+                                  Grid.Row="1"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  NavigationStarting="Browser_NavigationStarting"
+                                  NavigationCompleted="Browser_NavigationCompleted"/>
+                </Grid>
+            </Border>
         </Grid>
 
-
-        <!-- WEBVIEW -->
-
-        <wv2:WebView2 x:Name="Browser"
-                      Grid.Row="1"
-                      NavigationStarting="Browser_NavigationStarting"
-                      NavigationCompleted="Browser_NavigationCompleted"/>
-
+        <GridSplitter Grid.Row="2"
+                      Height="6"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      ResizeDirection="Rows"
+                      ResizeBehavior="PreviousAndNext"
+                      ShowsPreview="True"
+                      Background="Transparent"
+                      ToolTip="برای تغییر ارتفاع گزارش‌ها بکشید"/>
 
         <!-- LOG AREA -->
 
-        <Grid Grid.Row="2"
-              Margin="0,10,0,0">
-
+        <Grid Grid.Row="3"
+              Margin="0,4,0,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*"/>
-                <ColumnDefinition Width="1.3*"/>
+                <ColumnDefinition Width="1.65*"
+                                  MinWidth="320"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*"
+                                  MinWidth="260"/>
             </Grid.ColumnDefinitions>
-
-
-            <!-- LIVE LOG -->
 
             <GroupBox Grid.Column="0"
                       Header="Live Network Log"
-                      Margin="0,0,5,0">
-
+                      Margin="0">
                 <TextBox x:Name="LogTextBox"
                          IsReadOnly="True"
                          AcceptsReturn="True"
@@ -181,19 +311,24 @@
                          HorizontalScrollBarVisibility="Auto"
                          FontFamily="Consolas"
                          FontSize="12"
-                         Padding="5"/>
-
+                         Padding="5"
+                         FlowDirection="LeftToRight"/>
             </GroupBox>
 
+            <GridSplitter Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"
+                          ShowsPreview="True"
+                          Background="Transparent"
+                          ToolTip="برای تغییر عرض گزارش‌ها بکشید"/>
 
-            <!-- IMPORTANT API -->
-
-            <GroupBox Grid.Column="1"
+            <GroupBox Grid.Column="2"
                       Header="Important API"
-                      Margin="5,0,0,0">
-
+                      Margin="0">
                 <Grid>
-
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
@@ -208,20 +343,19 @@
                              HorizontalScrollBarVisibility="Auto"
                              FontFamily="Consolas"
                              FontSize="12"
-                             Padding="5"/>
+                             Padding="5"
+                             FlowDirection="LeftToRight"/>
 
                     <Button x:Name="ClearImportantButton"
                             Grid.Row="1"
                             Content="پاک کردن Important API"
-                            Height="30"
-                            Margin="5"
+                            MinHeight="32"
+                            Margin="0,6,0,0"
+                            Padding="10,4"
+                            FlowDirection="RightToLeft"
                             Click="ClearImportantButton_Click"/>
                 </Grid>
-
             </GroupBox>
-
         </Grid>
-
     </Grid>
-
 </Window>

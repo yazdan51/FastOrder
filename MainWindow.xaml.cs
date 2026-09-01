@@ -53,6 +53,9 @@ namespace FastOrder
         private CancellationTokenSource? _scheduledOrderCancellation;
         private bool _scheduledOrderActive = false;
 
+        private WindowState _lastNonMinimizedWindowState =
+            WindowState.Normal;
+
         private bool _webViewTimingTestActive = false;
 
         private bool _orderUiDryRunTimingActive = false;
@@ -88,8 +91,280 @@ namespace FastOrder
         {
             InitializeComponent();
 
+            RestoreWindowLayout();
+
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
+            StateChanged += MainWindow_StateChanged;
+        }
+
+        private void RestoreWindowLayout()
+        {
+            try
+            {
+                Properties.Settings settings =
+                    Properties.Settings.Default;
+
+                Rect virtualScreen =
+                    new(
+                        SystemParameters.VirtualScreenLeft,
+                        SystemParameters.VirtualScreenTop,
+                        SystemParameters.VirtualScreenWidth,
+                        SystemParameters.VirtualScreenHeight);
+
+                double maximumWidth =
+                    Math.Max(
+                        MinWidth,
+                        virtualScreen.Width);
+
+                double maximumHeight =
+                    Math.Max(
+                        MinHeight,
+                        virtualScreen.Height);
+
+                double restoredWidth =
+                    NormalizeLayoutDimension(
+                        settings.MainWindowWidth,
+                        Width,
+                        MinWidth,
+                        maximumWidth);
+
+                double restoredHeight =
+                    NormalizeLayoutDimension(
+                        settings.MainWindowHeight,
+                        Height,
+                        MinHeight,
+                        maximumHeight);
+
+                Rect primaryWorkArea =
+                    SystemParameters.WorkArea;
+
+                double restoredLeft =
+                    double.IsFinite(
+                        settings.MainWindowLeft)
+                        ? settings.MainWindowLeft
+                        : primaryWorkArea.Left +
+                          Math.Max(
+                              0,
+                              (primaryWorkArea.Width - restoredWidth) / 2);
+
+                double restoredTop =
+                    double.IsFinite(
+                        settings.MainWindowTop)
+                        ? settings.MainWindowTop
+                        : primaryWorkArea.Top +
+                          Math.Max(
+                              0,
+                              (primaryWorkArea.Height - restoredHeight) / 2);
+
+                Rect restoredBounds =
+                    new(
+                        restoredLeft,
+                        restoredTop,
+                        restoredWidth,
+                        restoredHeight);
+
+                Rect visibleBounds =
+                    Rect.Intersect(
+                        restoredBounds,
+                        virtualScreen);
+
+                const double minimumVisibleEdge =
+                    80;
+
+                if (visibleBounds.IsEmpty ||
+                    visibleBounds.Width < minimumVisibleEdge ||
+                    visibleBounds.Height < minimumVisibleEdge)
+                {
+                    restoredWidth =
+                        Math.Min(
+                            restoredWidth,
+                            primaryWorkArea.Width);
+
+                    restoredHeight =
+                        Math.Min(
+                            restoredHeight,
+                            primaryWorkArea.Height);
+
+                    restoredLeft =
+                        primaryWorkArea.Left +
+                        Math.Max(
+                            0,
+                            (primaryWorkArea.Width - restoredWidth) / 2);
+
+                    restoredTop =
+                        primaryWorkArea.Top +
+                        Math.Max(
+                            0,
+                            (primaryWorkArea.Height - restoredHeight) / 2);
+                }
+                else
+                {
+                    restoredLeft =
+                        Math.Clamp(
+                            restoredLeft,
+                            virtualScreen.Left,
+                            Math.Max(
+                                virtualScreen.Left,
+                                virtualScreen.Right - restoredWidth));
+
+                    restoredTop =
+                        Math.Clamp(
+                            restoredTop,
+                            virtualScreen.Top,
+                            Math.Max(
+                                virtualScreen.Top,
+                                virtualScreen.Bottom - restoredHeight));
+                }
+
+                WindowStartupLocation =
+                    WindowStartupLocation.Manual;
+
+                Width =
+                    restoredWidth;
+
+                Height =
+                    restoredHeight;
+
+                Left =
+                    restoredLeft;
+
+                Top =
+                    restoredTop;
+
+                ControlPanelColumn.Width =
+                    new GridLength(
+                        NormalizeLayoutDimension(
+                            settings.ControlPanelWidth,
+                            ControlPanelColumn.Width.Value,
+                            ControlPanelColumn.MinWidth,
+                            ControlPanelColumn.MaxWidth));
+
+                LogAreaRow.Height =
+                    new GridLength(
+                        NormalizeLayoutDimension(
+                            settings.LogAreaHeight,
+                            LogAreaRow.Height.Value,
+                            LogAreaRow.MinHeight,
+                            LogAreaRow.MaxHeight));
+
+                _lastNonMinimizedWindowState =
+                    settings.MainWindowState ==
+                    (int)WindowState.Maximized
+                        ? WindowState.Maximized
+                        : WindowState.Normal;
+
+                WindowState =
+                    _lastNonMinimizedWindowState;
+            }
+            catch
+            {
+                _lastNonMinimizedWindowState =
+                    WindowState.Normal;
+            }
+        }
+
+        private static double NormalizeLayoutDimension(
+            double value,
+            double fallback,
+            double minimum,
+            double maximum)
+        {
+            double validFallback =
+                double.IsFinite(
+                    fallback)
+                    ? fallback
+                    : minimum;
+
+            double candidate =
+                double.IsFinite(
+                    value)
+                    ? value
+                    : validFallback;
+
+            return Math.Clamp(
+                candidate,
+                minimum,
+                Math.Max(
+                    minimum,
+                    maximum));
+        }
+
+        private void MainWindow_StateChanged(
+            object? sender,
+            EventArgs e)
+        {
+            if (WindowState !=
+                WindowState.Minimized)
+            {
+                _lastNonMinimizedWindowState =
+                    WindowState;
+            }
+        }
+
+        private void SaveWindowLayout()
+        {
+            try
+            {
+                Rect bounds =
+                    WindowState ==
+                    WindowState.Normal
+                        ? new Rect(
+                            Left,
+                            Top,
+                            ActualWidth,
+                            ActualHeight)
+                        : RestoreBounds;
+
+                Properties.Settings settings =
+                    Properties.Settings.Default;
+
+                if (!bounds.IsEmpty &&
+                    double.IsFinite(
+                        bounds.Left) &&
+                    double.IsFinite(
+                        bounds.Top) &&
+                    double.IsFinite(
+                        bounds.Width) &&
+                    double.IsFinite(
+                        bounds.Height))
+                {
+                    settings.MainWindowLeft =
+                        bounds.Left;
+
+                    settings.MainWindowTop =
+                        bounds.Top;
+
+                    settings.MainWindowWidth =
+                        bounds.Width;
+
+                    settings.MainWindowHeight =
+                        bounds.Height;
+                }
+
+                settings.MainWindowState =
+                    (int)_lastNonMinimizedWindowState;
+
+                settings.ControlPanelWidth =
+                    NormalizeLayoutDimension(
+                        ControlPanelColumn.ActualWidth,
+                        ControlPanelColumn.Width.Value,
+                        ControlPanelColumn.MinWidth,
+                        ControlPanelColumn.MaxWidth);
+
+                settings.LogAreaHeight =
+                    NormalizeLayoutDimension(
+                        LogAreaRow.ActualHeight,
+                        LogAreaRow.Height.Value,
+                        LogAreaRow.MinHeight,
+                        LogAreaRow.MaxHeight);
+
+                settings.Save();
+            }
+            catch
+            {
+                // Layout persistence must never prevent a safe application shutdown.
+            }
         }
 
         private async void PreviewOrderButton_Click(
@@ -4220,6 +4495,8 @@ namespace FastOrder
             object? sender,
             CancelEventArgs e)
         {
+            SaveWindowLayout();
+
             try
             {
                 _scheduledOrderCancellation?.Cancel();
