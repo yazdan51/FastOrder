@@ -22,7 +22,7 @@ commit that contains the implementation.
 | 74 — Responsive UI shell | Completed | 2026-09-01 | `4c670098d6e204510f5488b96df4b01a259798b2` |
 | 75 — Session model + session list UI | Completed | 2026-09-01 | `b5cfd60ecc580a9069f89a931b6ae77a5ab3e776` |
 | 75.1 — Exchange-synchronized scheduler clock | Completed | 2026-09-01 | `35d004d4b777ddb3c2fa48f81293e822c5e155d0` |
-| 76 — Move confirmation ownership into sessions | Not started | — | — |
+| 76 — Move confirmation ownership into sessions | Completed | 2026-09-01 | `755e8355aa7d3b8642e4422e1806671a9ec84770` |
 | 77 — Central Official UI Dispatcher | Not started | — | — |
 | 78 — Global next-due priority queue | Not started | — | — |
 | 79 — Enable concurrent active sessions | Not started | — | — |
@@ -184,19 +184,62 @@ commit that contains the implementation.
 
 ## Stage 76 — Move confirmation ownership into sessions
 
-**Status:** Not started
+**Status:** Completed on 2026-09-01
 
-Planned scope from the approved architecture:
+**Commit:** `755e8355aa7d3b8642e4422e1806671a9ec84770` (`Move confirmed snapshots into order sessions`)
 
-- give every created session its own independent confirmed snapshot;
-- remove created-session dependence on one mutable global confirmation;
-- keep Current Order Setup independent from existing sessions.
+### Delivered changes
 
-No Stage 76 implementation is claimed by this document yet.
+- Added an explicit independent-copy operation to `ConfirmedOrderSnapshot` that preserves the
+  confirmed payload, fingerprint, and confirmation timestamp while creating a separate immutable
+  object.
+- Made `OrderSession` take ownership of that independent copy during construction.
+- Renamed the window-level snapshot to `_currentOrderSnapshot` so its scope is explicitly limited
+  to Current Order Setup before session creation.
+- Detached the Current Order Setup confirmation immediately after a session is created while
+  preserving the visible symbol, ISIN, price, quantity, commission, and total-value summary.
+- Changed the scheduler entry point to accept only the created `OrderSession`; it reconstructs and
+  validates the authoritative order from `session.ConfirmedOrderSnapshot`.
+- Added a session identity check that fail-closes if the session snapshot's symbol, ISIN, side,
+  price, or total quantity does not match the immutable session fields.
+- Routed every scheduled slice through the session-owned snapshot and removed all scheduler-slot
+  reads of the mutable Current Order Setup snapshot.
+- Stopped schedule cleanup from clearing Current Order Setup confirmation state belonging to a
+  later setup, preparing the ownership boundary for future multi-session stages.
+
+### Changed files
+
+- `ConfirmedOrderSnapshot.cs`
+- `OrderSession.cs`
+- `MainWindow.xaml.cs`
+
+### Preserved behavior and non-goals
+
+- Only one session can execute at a time; concurrent execution remains deferred to Stage 79.
+- TSETMC exchange-clock synchronization, freshness checks, and fail-closed timing are unchanged.
+- The one-second slot cadence and missed-slot no-burst behavior are unchanged.
+- Prime Until Ready behavior is unchanged.
+- Existing `sent` and `in-flight` reservation and settlement accounting is unchanged.
+- The final submit remains the official EasyTrader UI action; no direct broker API order path was
+  introduced.
+- Current Order Setup remains populated after Add to Schedule, but its old confirmation is no
+  longer authoritative for the created session.
+
+### Verification
+
+- Debug build passed with zero compilation errors.
+- Release build passed with zero compilation errors.
+- The only build warning was `NU1900`, caused by the unavailable NuGet vulnerability feed.
+- Static dependency checks confirmed that `RunScheduledOrderAsync`,
+  `DispatchReservedSliceAsync`, and `ExecuteClockDrivenSliceAttemptAsync` now receive the
+  `OrderSession` and do not read `_currentOrderSnapshot`.
+- Static route checks confirmed that `BuildAtomicScheduledSubmitScript`, Prime Until Ready, and
+  the existing `sent`/`in-flight` accounting remain on the same execution path.
+- No live order was sent during Stage 76 verification.
 
 ## Template for future stages
 
-Copy this structure when completing Stage 76 and later stages:
+Copy this structure when completing Stage 77 and later stages:
 
 ```markdown
 ## Stage NN — Name
