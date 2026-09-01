@@ -106,5 +106,17 @@ namespace FastOrder.Properties {
                 this["LogAreaHeight"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("easytrader")]
+        public string SelectedBrokerId {
+            get {
+                return ((string)(this["SelectedBrokerId"]));
+            }
+            set {
+                this["SelectedBrokerId"] = value;
+            }
+        }
     }
 }

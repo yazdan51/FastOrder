@@ -105,6 +105,13 @@ namespace FastOrder
             ConfirmedOrderSnapshot =
                 confirmedOrderSnapshot.CreateIndependentCopy();
 
+            BrokerId =
+                ConfirmedOrderSnapshot.BrokerId;
+
+            BrokerDisplayName =
+                BrokerProfiles.GetDisplayName(
+                    BrokerId);
+
             CreatedAt =
                 DateTimeOffset.Now;
 
@@ -133,6 +140,16 @@ namespace FastOrder
                 .ToUpperInvariant();
 
         public long CreationSequence
+        {
+            get;
+        }
+
+        public string BrokerId
+        {
+            get;
+        }
+
+        public string BrokerDisplayName
         {
             get;
         }

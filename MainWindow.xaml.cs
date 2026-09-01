@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -15,12 +16,6 @@ namespace FastOrder
 {
     public partial class MainWindow : Window
     {
-        private const string EasyTraderUrl =
-            "https://d.easytrader.ir/";
-
-        private const string ApiHost =
-            "api-mts.orbis.easytrader.ir";
-
         private static readonly TimeSpan ConfirmedOrderLifetime =
             TimeSpan.FromMinutes(
                 10);
@@ -92,6 +87,9 @@ namespace FastOrder
 
         private bool _orderUiDryRunTimingActive = false;
 
+        private BrokerProfile _selectedBroker =
+            BrokerProfiles.EasyTrader;
+
         private enum ScheduledOrderAttemptOutcome
         {
             Succeeded,
@@ -123,6 +121,18 @@ namespace FastOrder
         {
             InitializeComponent();
 
+            _selectedBroker =
+                BrokerProfiles.ResolveOrDefault(
+                    Properties.Settings.Default.SelectedBrokerId);
+
+            BrokerSelectionComboBox.ItemsSource =
+                BrokerProfiles.All;
+
+            BrokerSelectionComboBox.SelectedItem =
+                _selectedBroker;
+
+            UpdateBrokerPresentation();
+
             _exchangeClockDisplayTimer =
                 new DispatcherTimer(
                     DispatcherPriority.Background)
@@ -146,6 +156,157 @@ namespace FastOrder
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
             StateChanged += MainWindow_StateChanged;
+        }
+
+        private void BrokerSelectionComboBox_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (BrokerSelectionComboBox.SelectedItem is not BrokerProfile selectedBroker)
+            {
+                return;
+            }
+
+            if (_scheduledOrderActive ||
+                _liveSubmissionInProgress)
+            {
+                BrokerSelectionComboBox.SelectedItem =
+                    _selectedBroker;
+
+                SetStatus(
+                    "تغییر کارگزاری هنگام زمان‌بندی یا ارسال فعال مجاز نیست.");
+
+                return;
+            }
+
+            if (string.Equals(
+                selectedBroker.Id,
+                _selectedBroker.Id,
+                StringComparison.Ordinal))
+            {
+                UpdateBrokerPresentation();
+                return;
+            }
+
+            ClearCurrentOrderConfirmation();
+            ResetCurrentOrderSetupForBrokerSwitch();
+            ResetBrokerSessionEvidence();
+
+            _selectedBroker =
+                selectedBroker;
+
+            Properties.Settings.Default.SelectedBrokerId =
+                _selectedBroker.Id;
+
+            UpdateBrokerPresentation();
+
+            WriteImportant("");
+            WriteImportant(
+                "BROKER SELECTED: " +
+                _selectedBroker.DisplayName);
+            WriteImportant(
+                "TRUSTED ORIGIN: " +
+                _selectedBroker.TrustedOrigin);
+            WriteImportant(
+                "DIRECT API CREDENTIALS: NOT ACCESSED");
+
+            if (_webViewReady &&
+                Browser.CoreWebView2 != null)
+            {
+                Browser.CoreWebView2.Navigate(
+                    _selectedBroker.TradingUrl);
+            }
+        }
+
+        private void UpdateBrokerPresentation()
+        {
+            string brokerName =
+                _selectedBroker.DisplayName;
+
+            BrokerRouteTextBlock.Text =
+                "مسیر رسمی " +
+                brokerName;
+
+            BrokerWebViewTitleTextBlock.Text =
+                brokerName;
+
+            LoginButton.Content =
+                "ورود به " +
+                brokerName;
+
+            PreviewOrderButton.ToolTip =
+                "فرم رسمی خرید نماد جاری " +
+                brokerName +
+                " را باز می‌کند؛ ارسال انجام نمی‌شود.";
+
+            bool orderUiAvailable =
+                _selectedBroker.SupportsOfficialOrderUiAutomation;
+
+            PreviewOrderButton.IsEnabled =
+                orderUiAvailable;
+
+            OrderUiDryRunTimingButton.IsEnabled =
+                orderUiAvailable;
+
+            if (!orderUiAvailable)
+            {
+                ReadOrderFormButton.IsEnabled =
+                    false;
+
+                PrepareOrderButton.IsEnabled =
+                    false;
+
+                SendLiveOrderButton.IsEnabled =
+                    false;
+            }
+        }
+
+        private bool EnsureSelectedBrokerOrderUiAvailable(
+            string operationName)
+        {
+            if (_selectedBroker.SupportsOfficialOrderUiAutomation)
+            {
+                return true;
+            }
+
+            string reason =
+                "مسیر رسمی فرم سفارش " +
+                _selectedBroker.DisplayName +
+                " هنوز با DOM ورودکرده این کارگزاری تطبیق و تأیید نشده است.";
+
+            WriteImportant("");
+            WriteImportant(
+                "BROKER ORDER UI BLOCKED: " +
+                operationName);
+            WriteImportant(
+                "BROKER: " +
+                _selectedBroker.DisplayName);
+            WriteImportant(
+                "REASON: " +
+                reason);
+            WriteImportant(
+                "FINAL SUBMIT CLICK: NO");
+            WriteImportant(
+                "HTTP POST: NOT SENT");
+
+            SetStatus(
+                reason);
+
+            return false;
+        }
+
+        private void ResetBrokerSessionEvidence()
+        {
+            _authorizationHeaderObserved =
+                false;
+
+            _successfulSessionResponseObserved =
+                false;
+
+            _successfulProtectedApiResponseObserved =
+                false;
+
+            ResetLiveSubmissionTracking();
         }
 
         private void OfficialUiDispatcher_StateChanged(
@@ -460,6 +621,9 @@ namespace FastOrder
                         LogAreaRow.MinHeight,
                         LogAreaRow.MaxHeight);
 
+                settings.SelectedBrokerId =
+                    _selectedBroker.Id;
+
                 settings.Save();
             }
             catch
@@ -478,9 +642,17 @@ namespace FastOrder
                 return;
             }
 
+            if (!EnsureSelectedBrokerOrderUiAvailable(
+                "open-current-order-form"))
+            {
+                return;
+            }
+
             if (!_webViewReady || Browser.CoreWebView2 == null)
             {
-                SetStatus("EasyTrader هنوز آماده نیست.");
+                SetStatus(
+                    _selectedBroker.DisplayName +
+                    " هنوز آماده نیست.");
                 return;
             }
 
@@ -540,7 +712,9 @@ namespace FastOrder
 
                 WriteImportant("");
                 WriteImportant("========================================");
-                WriteImportant("OPEN CURRENT EASYTRADER ORDER FORM");
+                WriteImportant(
+                    "OPEN CURRENT BROKER ORDER FORM: " +
+                    _selectedBroker.DisplayName);
                 WriteImportant("========================================");
                 WriteImportant("STATUS: " + result.Status);
                 WriteImportant("REASON: " + result.Reason);
@@ -558,14 +732,19 @@ namespace FastOrder
                 ReadOrderFormButton.IsEnabled = opened;
 
                 SetStatus(opened
-                    ? "فرم رسمی خرید باز شد؛ قیمت و تعداد را در EasyTrader وارد کنید، سپس «خواندن و تأیید فرم» را بزنید."
+                    ? "فرم رسمی خرید باز شد؛ قیمت و تعداد را در " +
+                      _selectedBroker.DisplayName +
+                      " وارد کنید، سپس «خواندن و تأیید فرم» را بزنید."
                     : "فرم نماد جاری باز نشد: " + OfficialOrderUiBridge.GetUserMessage(result.Status));
             }
             catch (Exception ex)
             {
                 ReadOrderFormButton.IsEnabled = false;
                 WriteImportant("OPEN CURRENT ORDER FORM ERROR: " + ex.Message);
-                SetStatus("خطا در باز کردن فرم سفارش EasyTrader.");
+                SetStatus(
+                    "خطا در باز کردن فرم سفارش " +
+                    _selectedBroker.DisplayName +
+                    ".");
             }
         }
 
@@ -579,9 +758,17 @@ namespace FastOrder
                 return;
             }
 
+            if (!EnsureSelectedBrokerOrderUiAvailable(
+                "read-current-order-form"))
+            {
+                return;
+            }
+
             if (!_webViewReady || Browser.CoreWebView2 == null)
             {
-                SetStatus("EasyTrader هنوز آماده نیست.");
+                SetStatus(
+                    _selectedBroker.DisplayName +
+                    " هنوز آماده نیست.");
                 return;
             }
 
@@ -680,6 +867,7 @@ namespace FastOrder
                 }
 
                 _currentOrderSnapshot = ConfirmedOrderSnapshot.Create(
+                    _selectedBroker.Id,
                     payloadJson);
                 PrepareOrderButton.IsEnabled = true;
                 PrepareOrderButton.Content = "آماده‌سازی محلی";
@@ -689,7 +877,9 @@ namespace FastOrder
 
                 WriteImportant("");
                 WriteImportant("========================================");
-                WriteImportant("ORDER READ FROM EASYTRADER FORM");
+                WriteImportant(
+                    "ORDER READ FROM BROKER FORM: " +
+                    _selectedBroker.DisplayName);
                 WriteImportant("========================================");
                 WriteImportant("SYMBOL: " + payload.Order.SymbolName);
                 WriteImportant("ISIN: " + payload.Order.SymbolIsin);
@@ -996,10 +1186,12 @@ namespace FastOrder
                     "Monitoring قبل از Navigate فعال شد.");
 
                 SetStatus(
-                    "در حال ورود به EasyTrader...");
+                    "در حال ورود به " +
+                    _selectedBroker.DisplayName +
+                    "...");
 
                 coreWebView.Navigate(
-                    EasyTraderUrl);
+                    _selectedBroker.TradingUrl);
             }
             catch (Exception ex)
             {
@@ -1038,10 +1230,25 @@ namespace FastOrder
 
             try
             {
-                Browser.CoreWebView2
-                    .AddWebResourceRequestedFilter(
-                        "https://" + ApiHost + "/*",
-                        CoreWebView2WebResourceContext.All);
+                System.Collections.Generic.HashSet<string> monitoredHosts =
+                    new System.Collections.Generic.HashSet<string>(
+                        StringComparer.OrdinalIgnoreCase);
+
+                foreach (BrokerProfile profile in BrokerProfiles.All)
+                {
+                    if (!monitoredHosts.Add(
+                        profile.MonitoredHost))
+                    {
+                        continue;
+                    }
+
+                    Browser.CoreWebView2
+                        .AddWebResourceRequestedFilter(
+                            "https://" +
+                            profile.MonitoredHost +
+                            "/*",
+                            CoreWebView2WebResourceContext.All);
+                }
 
                 Browser.CoreWebView2
                     .WebResourceRequested +=
@@ -1065,7 +1272,8 @@ namespace FastOrder
                     "=================================");
 
                 WriteLog(
-                    "Host: " + ApiHost);
+                    "Selected broker host: " +
+                    _selectedBroker.MonitoredHost);
             }
             catch (Exception ex)
             {
@@ -1333,6 +1541,14 @@ namespace FastOrder
         private bool IsImportantRequest(
             string url)
         {
+            if (!string.Equals(
+                _selectedBroker.Id,
+                BrokerProfiles.EasyTraderId,
+                StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             string u =
                 url.ToLowerInvariant();
 
@@ -1353,9 +1569,17 @@ namespace FastOrder
                     "/connect/token");
         }
 
-        private static bool IsSessionRequest(
+        private bool IsSessionRequest(
             string url)
         {
+            if (!string.Equals(
+                _selectedBroker.Id,
+                BrokerProfiles.EasyTraderId,
+                StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             return
                 url.Contains(
                     "/easy/api/account/same-login",
@@ -1366,9 +1590,17 @@ namespace FastOrder
                     StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsProtectedOrderApiRequest(
+        private bool IsProtectedOrderApiRequest(
             string url)
         {
+            if (!string.Equals(
+                _selectedBroker.Id,
+                BrokerProfiles.EasyTraderId,
+                StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             if (!Uri.TryCreate(
                 url,
                 UriKind.Absolute,
@@ -1398,10 +1630,18 @@ namespace FastOrder
                     StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsCreateOrderRequest(
+        private bool IsCreateOrderRequest(
             string method,
             string url)
         {
+            if (!string.Equals(
+                _selectedBroker.Id,
+                BrokerProfiles.EasyTraderId,
+                StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             if (!method.Equals(
                 "POST",
                 StringComparison.OrdinalIgnoreCase) ||
@@ -1415,7 +1655,7 @@ namespace FastOrder
 
             return
                 uri.Host.Equals(
-                    ApiHost,
+                    _selectedBroker.MonitoredHost,
                     StringComparison.OrdinalIgnoreCase)
                 &&
                 uri.AbsolutePath.Equals(
@@ -1423,7 +1663,7 @@ namespace FastOrder
                     StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsMonitoredApiUrl(
+        private bool IsMonitoredApiUrl(
             string url)
         {
             return
@@ -1433,7 +1673,7 @@ namespace FastOrder
                     out Uri? uri)
                 &&
                 uri.Host.Equals(
-                    ApiHost,
+                    _selectedBroker.MonitoredHost,
                     StringComparison.OrdinalIgnoreCase);
         }
 
@@ -1471,6 +1711,12 @@ namespace FastOrder
             object sender,
             RoutedEventArgs e)
         {
+            if (!EnsureSelectedBrokerOrderUiAvailable(
+                "prepare-current-order"))
+            {
+                return;
+            }
+
             WriteImportant("");
             WriteImportant(
                 "========================================");
@@ -1646,6 +1892,12 @@ namespace FastOrder
             object sender,
             RoutedEventArgs e)
         {
+            if (!EnsureSelectedBrokerOrderUiAvailable(
+                "schedule-current-order"))
+            {
+                return;
+            }
+
             // قفل هم‌زمانی مانع ایجاد دو چرخه ارسال از یک پنجره می‌شود.
             if (_scheduledOrderActive ||
                 _liveSubmissionInProgress)
@@ -1922,6 +2174,32 @@ namespace FastOrder
         {
             ArgumentNullException.ThrowIfNull(
                 session);
+
+            if (!string.Equals(
+                session.BrokerId,
+                _selectedBroker.Id,
+                StringComparison.Ordinal))
+            {
+                session.SetState(
+                    OrderSessionState.Failed,
+                    "کارگزاری نشست با مسیر فعال تطبیق ندارد",
+                    "پیش از اجرا، همان کارگزاری ثبت‌شده در Snapshot را انتخاب کنید.");
+
+                WriteLiveSubmissionBlocked(
+                    "کارگزاری نشست با مسیر فعال تطبیق ندارد.");
+
+                return;
+            }
+
+            if (!EnsureSelectedBrokerOrderUiAvailable(
+                "run-scheduled-order"))
+            {
+                session.SetState(
+                    OrderSessionState.Failed,
+                    "مسیر رسمی کارگزاری آماده نیست");
+
+                return;
+            }
 
             if (!TryGetValidatedSessionOrder(
                 session,
@@ -3807,6 +4085,12 @@ namespace FastOrder
         private void SetScheduledOrderControls(
             bool isActive)
         {
+            BrokerSelectionComboBox.IsEnabled =
+                !isActive;
+
+            BrokerCompatibilityProbeButton.IsEnabled =
+                !isActive;
+
             LoginButton.IsEnabled =
                 !isActive;
 
@@ -3826,6 +4110,24 @@ namespace FastOrder
 
             CancelScheduledOrderButton.IsEnabled =
                 isActive;
+
+            if (!_selectedBroker.SupportsOfficialOrderUiAutomation)
+            {
+                PreviewOrderButton.IsEnabled =
+                    false;
+
+                ReadOrderFormButton.IsEnabled =
+                    false;
+
+                PrepareOrderButton.IsEnabled =
+                    false;
+
+                SendLiveOrderButton.IsEnabled =
+                    false;
+
+                OrderUiDryRunTimingButton.IsEnabled =
+                    false;
+            }
         }
 
         /// <summary>
@@ -4055,11 +4357,31 @@ namespace FastOrder
             snapshot =
                 _currentOrderSnapshot;
 
-            return TryGetValidatedSnapshotOrder(
+            if (!TryGetValidatedSnapshotOrder(
                 snapshot,
                 requireFreshConfirmation: true,
                 out payload,
-                out errorMessage);
+                out errorMessage))
+            {
+                return false;
+            }
+
+            if (snapshot == null ||
+                !string.Equals(
+                    snapshot.BrokerId,
+                    _selectedBroker.Id,
+                    StringComparison.Ordinal))
+            {
+                payload =
+                    null;
+
+                errorMessage =
+                    "Snapshot تأییدشده متعلق به کارگزاری انتخاب‌شده نیست.";
+
+                return false;
+            }
+
+            return true;
         }
 
         private static bool TryGetValidatedSessionOrder(
@@ -4081,6 +4403,21 @@ namespace FastOrder
                 out errorMessage) ||
                 payload?.Order == null)
             {
+                return false;
+            }
+
+            if (snapshot == null ||
+                !string.Equals(
+                snapshot.BrokerId,
+                session.BrokerId,
+                StringComparison.Ordinal))
+            {
+                payload =
+                    null;
+
+                errorMessage =
+                    "کارگزاری Snapshot مستقل با هویت نشست تطبیق ندارد.";
+
                 return false;
             }
 
@@ -4393,6 +4730,39 @@ namespace FastOrder
             }
         }
 
+        private void ResetCurrentOrderSetupForBrokerSwitch()
+        {
+            _hasCurrentOrderSetup =
+                false;
+
+            CurrentSetupSymbolTextBlock.Text =
+                "—";
+
+            CurrentSetupIsinTextBlock.Text =
+                "—";
+
+            CurrentSetupPriceTextBlock.Text =
+                "—";
+
+            CurrentSetupQuantityTextBlock.Text =
+                "—";
+
+            CurrentSetupCommissionTextBlock.Text =
+                "—";
+
+            CurrentSetupTotalValueTextBlock.Text =
+                "—";
+
+            CurrentSetupStateTextBlock.Text =
+                "برای کارگزاری انتخاب‌شده هنوز سفارشی خوانده و تأیید نشده است.";
+
+            CurrentSetupStateTextBlock.Foreground =
+                Brushes.SlateGray;
+
+            ReadOrderFormButton.IsEnabled =
+                false;
+        }
+
         private void UpdateCurrentOrderSetup(
             Order order)
         {
@@ -4439,7 +4809,8 @@ namespace FastOrder
                     CultureInfo.InvariantCulture);
 
             CurrentSetupStateTextBlock.Text =
-                "خوانده و تأیید شده از فرم رسمی EasyTrader";
+                "خوانده و تأیید شده از فرم رسمی " +
+                _selectedBroker.DisplayName;
 
             CurrentSetupStateTextBlock.Foreground =
                 System.Windows.Media.Brushes.Teal;
@@ -4469,6 +4840,118 @@ namespace FastOrder
         /// تست فقط زمان‌بندی ExecuteScriptAsync را اندازه‌گیری می‌کند.
         /// هیچ کلیک، تغییر فرم، درخواست شبکه یا دسترسی به اطلاعات احراز هویت ندارد.
         /// </summary>
+        private async void BrokerCompatibilityProbeButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (_scheduledOrderActive ||
+                _liveSubmissionInProgress)
+            {
+                SetStatus(
+                    "بررسی ساختاری هنگام زمان‌بندی یا ارسال فعال مجاز نیست.");
+
+                return;
+            }
+
+            if (!_webViewReady ||
+                Browser.CoreWebView2 == null)
+            {
+                SetStatus(
+                    "WebView2 هنوز آماده نیست.");
+
+                return;
+            }
+
+            BrokerCompatibilityProbeButton.IsEnabled =
+                false;
+
+            try
+            {
+                CoreWebView2 coreWebView =
+                    Browser.CoreWebView2;
+
+                string json =
+                    await _officialUiDispatcher.DispatchAsync(
+                        "broker-compatibility-probe",
+                        "در حال بررسی ساختاری رابط " +
+                        _selectedBroker.DisplayName +
+                        "...",
+                        async cancellationToken =>
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            return await coreWebView.ExecuteScriptAsync(
+                                BrokerCompatibilityProbe.BuildScript(
+                                    _selectedBroker.TrustedOrigin));
+                        });
+
+                BrokerCompatibilityProbeResult result =
+                    BrokerCompatibilityProbe.ParseResult(
+                        json);
+
+                string reportJson =
+                    JsonSerializer.Serialize(
+                        result,
+                        new JsonSerializerOptions
+                        {
+                            Encoder =
+                                System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+
+                            WriteIndented =
+                                true
+                        });
+
+                WriteImportant("");
+                WriteImportant(
+                    "========================================");
+                WriteImportant(
+                    "BROKER COMPATIBILITY PROBE");
+                WriteImportant(
+                    "========================================");
+                WriteImportant(
+                    "BROKER: " +
+                    _selectedBroker.DisplayName);
+                WriteImportant(
+                    "STATUS: " +
+                    result.Status);
+                WriteImportant(
+                    "FIELD VALUES: NOT READ");
+                WriteImportant(
+                    "TOKEN / COOKIE / HEADER VALUE / BODY: NOT READ");
+                WriteImportant(
+                    "FINAL SUBMIT CLICK: NO");
+                WriteImportant(
+                    "HTTP POST: NOT SENT");
+                WriteImportant(
+                    reportJson);
+                WriteImportant(
+                    "========================================");
+
+                SetStatus(
+                    result.Status ==
+                    BrokerCompatibilityProbe.ReadyStatus
+                        ? "گزارش ساختاری امن رابط " +
+                          _selectedBroker.DisplayName +
+                          " ثبت شد."
+                        : "بررسی ساختاری انجام نشد: " +
+                          result.Status);
+            }
+            catch (Exception ex)
+            {
+                WriteImportant(
+                    "BROKER COMPATIBILITY PROBE ERROR: " +
+                    ex.Message);
+
+                SetStatus(
+                    "خطا در بررسی ساختاری رابط کارگزاری.");
+            }
+            finally
+            {
+                BrokerCompatibilityProbeButton.IsEnabled =
+                    true;
+            }
+        }
+
         private async void WebViewTimingTestButton_Click(
             object sender,
             RoutedEventArgs e)
@@ -4735,6 +5218,12 @@ namespace FastOrder
                 return;
             }
 
+            if (!EnsureSelectedBrokerOrderUiAvailable(
+                "order-ui-dry-run"))
+            {
+                return;
+            }
+
             CoreWebView2? coreWebView =
                 Browser.CoreWebView2;
 
@@ -4747,16 +5236,13 @@ namespace FastOrder
                 return;
             }
 
-            if (!Uri.TryCreate(
-                coreWebView.Source,
-                UriKind.Absolute,
-                out Uri? activeUri) ||
-                !activeUri.Host.Equals(
-                    "d.easytrader.ir",
-                    StringComparison.OrdinalIgnoreCase))
+            if (!_selectedBroker.IsTrustedPage(
+                coreWebView.Source))
             {
                 SetStatus(
-                    "برای Dry-Run باید صفحه اصلی EasyTrader فعال باشد.");
+                    "برای Dry-Run باید صفحه رسمی " +
+                    _selectedBroker.DisplayName +
+                    " فعال باشد.");
 
                 return;
             }
@@ -5077,7 +5563,7 @@ namespace FastOrder
             }
 
             Browser.CoreWebView2.Navigate(
-                EasyTraderUrl);
+                _selectedBroker.TradingUrl);
         }
 
         // =====================================================
@@ -5096,22 +5582,27 @@ namespace FastOrder
                 "========================================");
 
             WriteImportant(
-                "MONITORING READY");
+                "MONITORING READY: " +
+                _selectedBroker.DisplayName);
+
+            if (string.Equals(
+                _selectedBroker.Id,
+                BrokerProfiles.EasyTraderId,
+                StringComparison.Ordinal))
+            {
+                WriteImportant(
+                    "Observed routes: same-login, startsession, core/api/v2/order");
+            }
+            else
+            {
+                WriteImportant(
+                    "Pishro route discovery: STRUCTURAL PROBE ONLY");
+                WriteImportant(
+                    "ORDER API CONTRACT: NOT ASSUMED");
+            }
 
             WriteImportant(
-                "دنبال این API ها هستیم:");
-
-            WriteImportant(
-                "1. same-login");
-
-            WriteImportant(
-                "2. startsession");
-
-            WriteImportant(
-                "3. core/api/v2/order");
-
-            WriteImportant(
-                "4. HTTP 401 / 403 / 500");
+                "HTTP errors observed: 401 / 403 / 500");
 
             WriteImportant(
                 "========================================");
@@ -5624,7 +6115,8 @@ namespace FastOrder
             WriteImportant(
                 "========================================");
             WriteImportant(
-                "LOGIN STATUS");
+                "LOGIN STATUS: " +
+                _selectedBroker.DisplayName);
             WriteImportant(
                 "========================================");
             WriteImportant(

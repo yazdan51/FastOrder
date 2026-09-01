@@ -7,10 +7,14 @@ namespace FastOrder
     public sealed class ConfirmedOrderSnapshot
     {
         private ConfirmedOrderSnapshot(
+            string brokerId,
             string payloadJson,
             string fingerprint,
             DateTimeOffset confirmedAtUtc)
         {
+            BrokerId =
+                brokerId;
+
             PayloadJson =
                 payloadJson;
 
@@ -19,6 +23,11 @@ namespace FastOrder
 
             ConfirmedAtUtc =
                 confirmedAtUtc;
+        }
+
+        public string BrokerId
+        {
+            get;
         }
 
         public string PayloadJson
@@ -40,8 +49,16 @@ namespace FastOrder
             Fingerprint[..16];
 
         public static ConfirmedOrderSnapshot Create(
+            string brokerId,
             string payloadJson)
         {
+            if (string.IsNullOrWhiteSpace(brokerId))
+            {
+                throw new ArgumentException(
+                    "Confirmed broker id cannot be empty.",
+                    nameof(brokerId));
+            }
+
             if (string.IsNullOrWhiteSpace(payloadJson))
             {
                 throw new ArgumentException(
@@ -51,9 +68,11 @@ namespace FastOrder
 
             string fingerprint =
                 ComputeFingerprint(
+                    brokerId,
                     payloadJson);
 
             return new ConfirmedOrderSnapshot(
+                brokerId,
                 payloadJson,
                 fingerprint,
                 DateTimeOffset.UtcNow);
@@ -63,6 +82,7 @@ namespace FastOrder
         {
             string currentFingerprint =
                 ComputeFingerprint(
+                    BrokerId,
                     PayloadJson);
 
             return string.Equals(
@@ -80,21 +100,25 @@ namespace FastOrder
             }
 
             return new ConfirmedOrderSnapshot(
+                BrokerId,
                 PayloadJson,
                 Fingerprint,
                 ConfirmedAtUtc);
         }
 
         private static string ComputeFingerprint(
+            string brokerId,
             string payloadJson)
         {
-            byte[] payloadBytes =
+            byte[] snapshotBytes =
                 Encoding.UTF8.GetBytes(
+                    brokerId +
+                    "\n" +
                     payloadJson);
 
             byte[] hash =
                 SHA256.HashData(
-                    payloadBytes);
+                    snapshotBytes);
 
             return Convert.ToHexString(
                 hash);

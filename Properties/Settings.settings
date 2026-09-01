@@ -25,5 +25,8 @@
     <Setting Name="LogAreaHeight" Type="System.Double" Scope="User">
       <Value Profile="(Default)">230</Value>
     </Setting>
+    <Setting Name="SelectedBrokerId" Type="System.String" Scope="User">
+      <Value Profile="(Default)">easytrader</Value>
+    </Setting>
   </Settings>
 </SettingsFile>
