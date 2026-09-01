@@ -674,6 +674,9 @@ Non-negotiable:
 
 ## 23. Implementation phases
 
+Implementation status, completed changes, verification evidence, and Git commits are maintained
+in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
+
 ### Stage 74 — Responsive UI shell
 
 - redesign `MainWindow.xaml`;
