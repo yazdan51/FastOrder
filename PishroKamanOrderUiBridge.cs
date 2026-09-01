@@ -11,8 +11,11 @@ namespace FastOrder
     /// </summary>
     internal static class PishroKamanOrderUiBridge
     {
-        private const string ExpectedOrigin =
-            "https://kaman.pishrobroker.ir";
+        private static readonly string[] ExpectedOrigins =
+        {
+            "https://kaman.pishrobroker.ir",
+            "https://mobile.pishrobroker.ir"
+        };
 
         private const string BridgePropertyName =
             "__fastOrderPishroKamanOfficialUiBridgeV1";
@@ -86,8 +89,8 @@ namespace FastOrder
             Order? order,
             string? nonce)
         {
-            string expectedOrigin =
-                JsonSerializer.Serialize(ExpectedOrigin);
+            string expectedOrigins =
+                JsonSerializer.Serialize(ExpectedOrigins);
 
             string serializedMode =
                 JsonSerializer.Serialize(mode);
@@ -118,7 +121,7 @@ namespace FastOrder
                         ({status, reason, symbolName, symbolIsin, price, quantity, side,
                           commissionAmount, totalValue});
                     const mode = {{serializedMode}};
-                    const expectedOrigin = {{expectedOrigin}};
+                    const expectedOrigins = {{expectedOrigins}};
                     const expectedSymbolName = {{expectedSymbolName}};
                     const expectedSymbolIsin = {{expectedSymbolIsin}}.toUpperCase();
                     const expectedQuantity = "{{expectedQuantity}}";
@@ -441,7 +444,7 @@ namespace FastOrder
                             "Official Pishro buy action was invoked once.");
                     };
 
-                    if (location.origin !== expectedOrigin)
+                    if (!expectedOrigins.includes(location.origin))
                         return result("INVALID_ORIGIN",
                             "Official Pishro Kaman origin was not active.");
 

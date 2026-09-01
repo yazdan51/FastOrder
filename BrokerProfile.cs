@@ -11,7 +11,9 @@ namespace FastOrder
             string tradingUrl,
             string trustedOrigin,
             string monitoredHost,
-            bool supportsOfficialOrderUiAutomation)
+            bool supportsOfficialOrderUiAutomation,
+            IEnumerable<string>? additionalTrustedOrigins = null,
+            IEnumerable<string>? additionalMonitoredHosts = null)
         {
             if (string.IsNullOrWhiteSpace(id))
             {
@@ -40,28 +42,29 @@ namespace FastOrder
                     nameof(tradingUrl));
             }
 
-            if (!Uri.TryCreate(
-                trustedOrigin,
-                UriKind.Absolute,
-                out Uri? originUri) ||
-                !originUri.Scheme.Equals(
-                    Uri.UriSchemeHttps,
-                    StringComparison.OrdinalIgnoreCase) ||
-                originUri.AbsolutePath != "/" ||
-                !string.IsNullOrEmpty(originUri.Query) ||
-                !string.IsNullOrEmpty(originUri.Fragment))
-            {
-                throw new ArgumentException(
-                    "Broker trusted origin must be an HTTPS origin without path, query, or fragment.",
-                    nameof(trustedOrigin));
-            }
+            List<string> trustedOrigins =
+                BuildTrustedOrigins(
+                    trustedOrigin,
+                    additionalTrustedOrigins);
 
-            if (string.IsNullOrWhiteSpace(monitoredHost) ||
-                monitoredHost.IndexOf('/') >= 0)
+            List<string> monitoredHosts =
+                BuildMonitoredHosts(
+                    monitoredHost,
+                    additionalMonitoredHosts);
+
+            string tradingOrigin =
+                tradingUri.GetLeftPart(
+                    UriPartial.Authority);
+
+            if (!trustedOrigins.Exists(
+                origin => string.Equals(
+                    origin,
+                    tradingOrigin,
+                    StringComparison.OrdinalIgnoreCase)))
             {
                 throw new ArgumentException(
-                    "Broker monitored host is invalid.",
-                    nameof(monitoredHost));
+                    "Broker trading URL origin must be in the trusted-origin allowlist.",
+                    nameof(tradingUrl));
             }
 
             Id =
@@ -74,11 +77,16 @@ namespace FastOrder
                 tradingUri.AbsoluteUri;
 
             TrustedOrigin =
-                originUri.GetLeftPart(
-                    UriPartial.Authority);
+                trustedOrigins[0];
+
+            TrustedOrigins =
+                trustedOrigins.ToArray();
 
             MonitoredHost =
-                monitoredHost.Trim();
+                monitoredHosts[0];
+
+            MonitoredHosts =
+                monitoredHosts.ToArray();
 
             SupportsOfficialOrderUiAutomation =
                 supportsOfficialOrderUiAutomation;
@@ -104,7 +112,17 @@ namespace FastOrder
             get;
         }
 
+        public IReadOnlyList<string> TrustedOrigins
+        {
+            get;
+        }
+
         public string MonitoredHost
+        {
+            get;
+        }
+
+        public IReadOnlyList<string> MonitoredHosts
         {
             get;
         }
@@ -117,16 +135,170 @@ namespace FastOrder
         public bool IsTrustedPage(
             string? url)
         {
-            return
-                Uri.TryCreate(
-                    url,
-                    UriKind.Absolute,
-                    out Uri? uri) &&
-                string.Equals(
-                    uri.GetLeftPart(
-                        UriPartial.Authority),
-                    TrustedOrigin,
-                    StringComparison.OrdinalIgnoreCase);
+            if (!Uri.TryCreate(
+                url,
+                UriKind.Absolute,
+                out Uri? uri))
+            {
+                return false;
+            }
+
+            string pageOrigin =
+                uri.GetLeftPart(
+                    UriPartial.Authority);
+
+            foreach (string trustedOrigin in TrustedOrigins)
+            {
+                if (string.Equals(
+                    pageOrigin,
+                    trustedOrigin,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool IsMonitoredHost(
+            string? host)
+        {
+            if (string.IsNullOrWhiteSpace(host))
+            {
+                return false;
+            }
+
+            foreach (string monitoredHost in MonitoredHosts)
+            {
+                if (string.Equals(
+                    host,
+                    monitoredHost,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static List<string> BuildTrustedOrigins(
+            string trustedOrigin,
+            IEnumerable<string>? additionalTrustedOrigins)
+        {
+            List<string> origins =
+                new List<string>();
+
+            AddTrustedOrigin(
+                origins,
+                trustedOrigin,
+                nameof(trustedOrigin));
+
+            if (additionalTrustedOrigins != null)
+            {
+                foreach (string additionalOrigin in additionalTrustedOrigins)
+                {
+                    AddTrustedOrigin(
+                        origins,
+                        additionalOrigin,
+                        nameof(additionalTrustedOrigins));
+                }
+            }
+
+            return origins;
+        }
+
+        private static void AddTrustedOrigin(
+            List<string> origins,
+            string origin,
+            string parameterName)
+        {
+            if (!Uri.TryCreate(
+                origin,
+                UriKind.Absolute,
+                out Uri? originUri) ||
+                !originUri.Scheme.Equals(
+                    Uri.UriSchemeHttps,
+                    StringComparison.OrdinalIgnoreCase) ||
+                originUri.AbsolutePath != "/" ||
+                !string.IsNullOrEmpty(originUri.Query) ||
+                !string.IsNullOrEmpty(originUri.Fragment))
+            {
+                throw new ArgumentException(
+                    "Broker trusted origin must be an HTTPS origin without path, query, or fragment.",
+                    parameterName);
+            }
+
+            string normalizedOrigin =
+                originUri.GetLeftPart(
+                    UriPartial.Authority);
+
+            if (!origins.Exists(
+                value => string.Equals(
+                    value,
+                    normalizedOrigin,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                origins.Add(
+                    normalizedOrigin);
+            }
+        }
+
+        private static List<string> BuildMonitoredHosts(
+            string monitoredHost,
+            IEnumerable<string>? additionalMonitoredHosts)
+        {
+            List<string> hosts =
+                new List<string>();
+
+            AddMonitoredHost(
+                hosts,
+                monitoredHost,
+                nameof(monitoredHost));
+
+            if (additionalMonitoredHosts != null)
+            {
+                foreach (string additionalHost in additionalMonitoredHosts)
+                {
+                    AddMonitoredHost(
+                        hosts,
+                        additionalHost,
+                        nameof(additionalMonitoredHosts));
+                }
+            }
+
+            return hosts;
+        }
+
+        private static void AddMonitoredHost(
+            List<string> hosts,
+            string host,
+            string parameterName)
+        {
+            if (string.IsNullOrWhiteSpace(host) ||
+                host.IndexOf('/') >= 0 ||
+                host.IndexOf(':') >= 0 ||
+                !Uri.CheckHostName(host.Trim()).Equals(
+                    UriHostNameType.Dns))
+            {
+                throw new ArgumentException(
+                    "Broker monitored host is invalid.",
+                    parameterName);
+            }
+
+            string normalizedHost =
+                host.Trim();
+
+            if (!hosts.Exists(
+                value => string.Equals(
+                    value,
+                    normalizedHost,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                hosts.Add(
+                    normalizedHost);
+            }
         }
 
         public override string ToString() =>
@@ -161,7 +333,15 @@ namespace FastOrder
             "https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81",
             "https://kaman.pishrobroker.ir",
             "kaman.pishrobroker.ir",
-            supportsOfficialOrderUiAutomation: true);
+            supportsOfficialOrderUiAutomation: true,
+            additionalTrustedOrigins: new[]
+            {
+                "https://mobile.pishrobroker.ir"
+            },
+            additionalMonitoredHosts: new[]
+            {
+                "mobile.pishrobroker.ir"
+            });
 
         public static IReadOnlyList<BrokerProfile> All
         {

@@ -89,15 +89,25 @@ namespace FastOrder
             };
 
         public static string BuildScript(
-            string expectedOrigin)
+            IReadOnlyList<string> expectedOrigins)
         {
-            string serializedOrigin =
+            ArgumentNullException.ThrowIfNull(
+                expectedOrigins);
+
+            if (expectedOrigins.Count == 0)
+            {
+                throw new ArgumentException(
+                    "At least one expected origin is required.",
+                    nameof(expectedOrigins));
+            }
+
+            string serializedOrigins =
                 JsonSerializer.Serialize(
-                    expectedOrigin);
+                    expectedOrigins);
 
             return $$"""
                 (() => {
-                    const expectedOrigin = {{serializedOrigin}};
+                    const expectedOrigins = {{serializedOrigins}};
                     const visible = element => {
                         if (!(element instanceof HTMLElement)) return false;
                         const style = getComputedStyle(element);
@@ -144,7 +154,7 @@ namespace FastOrder
                         };
                     };
 
-                    if (location.origin !== expectedOrigin) {
+                    if (!expectedOrigins.includes(location.origin)) {
                         return {
                             status: "INVALID_ORIGIN",
                             reason: "The selected broker origin is not active.",

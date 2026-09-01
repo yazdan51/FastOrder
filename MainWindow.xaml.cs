@@ -206,8 +206,10 @@ namespace FastOrder
                 "BROKER SELECTED: " +
                 _selectedBroker.DisplayName);
             WriteImportant(
-                "TRUSTED ORIGIN: " +
-                _selectedBroker.TrustedOrigin);
+                "TRUSTED ORIGINS: " +
+                string.Join(
+                    ", ",
+                    _selectedBroker.TrustedOrigins));
             WriteImportant(
                 "DIRECT API CREDENTIALS: NOT ACCESSED");
 
@@ -1278,18 +1280,21 @@ namespace FastOrder
 
                 foreach (BrokerProfile profile in BrokerProfiles.All)
                 {
-                    if (!monitoredHosts.Add(
-                        profile.MonitoredHost))
+                    foreach (string monitoredHost in profile.MonitoredHosts)
                     {
-                        continue;
-                    }
+                        if (!monitoredHosts.Add(
+                            monitoredHost))
+                        {
+                            continue;
+                        }
 
-                    Browser.CoreWebView2
-                        .AddWebResourceRequestedFilter(
-                            "https://" +
-                            profile.MonitoredHost +
-                            "/*",
-                            CoreWebView2WebResourceContext.All);
+                        Browser.CoreWebView2
+                            .AddWebResourceRequestedFilter(
+                                "https://" +
+                                monitoredHost +
+                                "/*",
+                                CoreWebView2WebResourceContext.All);
+                    }
                 }
 
                 Browser.CoreWebView2
@@ -1314,8 +1319,10 @@ namespace FastOrder
                     "=================================");
 
                 WriteLog(
-                    "Selected broker host: " +
-                    _selectedBroker.MonitoredHost);
+                    "Selected broker hosts: " +
+                    string.Join(
+                        ", ",
+                        _selectedBroker.MonitoredHosts));
             }
             catch (Exception ex)
             {
@@ -1696,9 +1703,8 @@ namespace FastOrder
             }
 
             return
-                uri.Host.Equals(
-                    _selectedBroker.MonitoredHost,
-                    StringComparison.OrdinalIgnoreCase)
+                _selectedBroker.IsMonitoredHost(
+                    uri.Host)
                 &&
                 uri.AbsolutePath.Equals(
                     "/core/api/v2/order",
@@ -1714,9 +1720,8 @@ namespace FastOrder
                     UriKind.Absolute,
                     out Uri? uri)
                 &&
-                uri.Host.Equals(
-                    _selectedBroker.MonitoredHost,
-                    StringComparison.OrdinalIgnoreCase);
+                _selectedBroker.IsMonitoredHost(
+                    uri.Host);
         }
 
         private void ObserveAuthorizationHeader(
@@ -4978,7 +4983,7 @@ namespace FastOrder
 
                             return await coreWebView.ExecuteScriptAsync(
                                 BrokerCompatibilityProbe.BuildScript(
-                                    _selectedBroker.TrustedOrigin));
+                                    _selectedBroker.TrustedOrigins));
                         });
 
                 BrokerCompatibilityProbeResult result =
