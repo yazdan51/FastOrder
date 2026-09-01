@@ -51,7 +51,7 @@ namespace FastOrder
         private bool _authorizationHeaderObserved = false;
         private bool _successfulSessionResponseObserved = false;
         private bool _successfulProtectedApiResponseObserved = false;
-        private ConfirmedOrderSnapshot? _confirmedOrderSnapshot;
+        private ConfirmedOrderSnapshot? _currentOrderSnapshot;
         private readonly ObservableCollection<OrderSession> _orderSessions =
             new ObservableCollection<OrderSession>();
         private long _nextOrderSessionSequence = 0;
@@ -423,7 +423,7 @@ namespace FastOrder
 
             try
             {
-                ClearConfirmedOrder();
+                ClearCurrentOrderConfirmation();
 
                 string json = await Browser.CoreWebView2.ExecuteScriptAsync(
                     OfficialOrderUiBridge.BuildOpenCurrentSymbolBuyDialogScript());
@@ -601,13 +601,14 @@ namespace FastOrder
 
                 if (confirmationWindow.ShowDialog() != true)
                 {
-                    ClearConfirmedOrder();
+                    ClearCurrentOrderConfirmation();
                     ReadOrderFormButton.IsEnabled = true;
                     SetStatus("تأیید سفارش لغو شد؛ هیچ سفارشی ارسال نشد.");
                     return;
                 }
 
-                _confirmedOrderSnapshot = ConfirmedOrderSnapshot.Create(payloadJson);
+                _currentOrderSnapshot = ConfirmedOrderSnapshot.Create(
+                    payloadJson);
                 PrepareOrderButton.IsEnabled = true;
                 PrepareOrderButton.Content = "آماده‌سازی محلی";
 
@@ -1407,7 +1408,7 @@ namespace FastOrder
                 "========================================");
 
             ConfirmedOrderSnapshot? snapshot =
-                _confirmedOrderSnapshot;
+                _currentOrderSnapshot;
 
             if (snapshot == null)
             {
@@ -1437,7 +1438,7 @@ namespace FastOrder
                 WriteImportant(
                     "========================================");
 
-                ClearConfirmedOrder();
+                ClearCurrentOrderConfirmation();
 
                 return;
             }
@@ -1461,7 +1462,7 @@ namespace FastOrder
                 WriteImportant(
                     "========================================");
 
-                ClearConfirmedOrder();
+                ClearCurrentOrderConfirmation();
 
                 return;
             }
@@ -1481,7 +1482,7 @@ namespace FastOrder
                 WriteImportant(
                     "========================================");
 
-                ClearConfirmedOrder();
+                ClearCurrentOrderConfirmation();
 
                 return;
             }
@@ -1593,7 +1594,7 @@ namespace FastOrder
             {
                 // Payload از Snapshot تأییدشده بازسازی و دوباره مستقل
                 // اعتبارسنجی می‌شود؛ داده‌های قابل‌ویرایش UI مبنا نیستند.
-                if (!TryGetValidatedConfirmedOrder(
+                if (!TryGetValidatedCurrentOrder(
                     out ConfirmedOrderSnapshot? snapshot,
                     out CreateOrderPayload? payload,
                     out string validationError) ||
@@ -1603,7 +1604,7 @@ namespace FastOrder
                     WriteLiveSubmissionBlocked(
                         validationError);
 
-                    ClearConfirmedOrder();
+                    ClearCurrentOrderConfirmation();
 
                     return;
                 }
@@ -1720,14 +1721,14 @@ namespace FastOrder
                 // پس از بسته‌شدن پنجره تأیید، Snapshot دوباره تطبیق داده می‌شود
                 // تا تغییر هم‌زمان سفارش نتواند وارد مسیر ارسال شود.
                 if (!ReferenceEquals(
-                    _confirmedOrderSnapshot,
+                    _currentOrderSnapshot,
                     snapshot) ||
                     !snapshot.HasValidFingerprint())
                 {
                     WriteLiveSubmissionBlocked(
                         "سفارش تأییدشده پیش از ارسال تغییر کرده است.");
 
-                    ClearConfirmedOrder();
+                    ClearCurrentOrderConfirmation();
 
                     return;
                 }
@@ -1806,17 +1807,15 @@ namespace FastOrder
                 SessionDataGrid.ScrollIntoView(
                     createdSession);
 
-                _activeOrderSession =
-                    createdSession;
+                // OrderSession کپی مستقل Snapshot را در اختیار دارد. تأیید فرم
+                // جاری از این نقطه جدا می‌شود، اما خلاصه Current Order Setup
+                // برای آماده‌سازی بعدی روی صفحه باقی می‌ماند.
+                ClearCurrentOrderConfirmation();
 
-                // از این نقطه به بعد، چرخه زمان‌بندی مالک کامل وضعیت ارسال است.
+                // از این نقطه به بعد، چرخه زمان‌بندی فقط از Snapshot خود نشست
+                // استفاده می‌کند و به وضعیت قابل‌تغییر فرم جاری وابسته نیست.
                 await RunScheduledOrderAsync(
                     coreWebView,
-                    snapshot,
-                    order,
-                    scheduledStartAt,
-                    scheduledEndAt,
-                    confirmationWindow.MaxQuantityPerOrder,
                     createdSession);
             }
             catch (Exception)
@@ -1831,7 +1830,7 @@ namespace FastOrder
                 WriteLiveSubmissionBlocked(
                     "خطای داخلی در مسیر کنترل‌شده رخ داد.");
 
-                if (_confirmedOrderSnapshot != null)
+                if (_currentOrderSnapshot != null)
                 {
                     SendLiveOrderButton.IsEnabled =
                         true;
@@ -1847,15 +1846,41 @@ namespace FastOrder
         /// </summary>
         private async Task RunScheduledOrderAsync(
             CoreWebView2 coreWebView,
-            ConfirmedOrderSnapshot snapshot,
-            Order order,
-            DateTimeOffset startAt,
-            DateTimeOffset endAt,
-            long maxQuantityPerOrder,
             OrderSession session)
         {
             ArgumentNullException.ThrowIfNull(
                 session);
+
+            if (!TryGetValidatedSessionOrder(
+                session,
+                out ConfirmedOrderSnapshot? snapshot,
+                out CreateOrderPayload? payload,
+                out string snapshotError) ||
+                snapshot == null ||
+                payload?.Order == null)
+            {
+                session.SetState(
+                    OrderSessionState.Failed,
+                    "Snapshot مستقل نشست نامعتبر است",
+                    snapshotError);
+
+                WriteLiveSubmissionBlocked(
+                    snapshotError);
+
+                return;
+            }
+
+            Order order =
+                payload.Order;
+
+            DateTimeOffset startAt =
+                session.StartTime;
+
+            DateTimeOffset endAt =
+                session.EndTime;
+
+            long maxQuantityPerOrder =
+                session.MaxQuantityPerOrder;
 
             if (endAt <= startAt)
             {
@@ -1883,6 +1908,9 @@ namespace FastOrder
 
                 return;
             }
+
+            _activeOrderSession =
+                session;
 
             using CancellationTokenSource cancellationSource =
                 new CancellationTokenSource();
@@ -2113,17 +2141,17 @@ namespace FastOrder
                     }
 
                     if (!ReferenceEquals(
-                        _confirmedOrderSnapshot,
+                        session.ConfirmedOrderSnapshot,
                         snapshot) ||
                         !snapshot.HasValidFingerprint())
                     {
                         session.SetState(
                             OrderSessionState.Failed,
-                            "Snapshot تأییدشده تغییر کرده است",
+                            "Snapshot مستقل نشست نامعتبر شده است",
                             "اجرای نشست پیش از اسلات بعدی متوقف شد.");
 
                         WriteScheduledOrderStopped(
-                            "سفارش تأییدشده تغییر کرده است.",
+                            "Snapshot مستقل نشست نامعتبر شده است.",
                             "STOPPED BEFORE NEXT SLOT");
 
                         break;
@@ -2209,7 +2237,7 @@ namespace FastOrder
                         Task dispatchTask =
                             DispatchReservedSliceAsync(
                                 coreWebView,
-                                snapshot,
+                                session,
                                 currentOrder,
                                 capturedSlotNumber,
                                 capturedQuantity,
@@ -2552,8 +2580,6 @@ namespace FastOrder
                         null;
                 }
 
-                ClearConfirmedOrder();
-
                 SetScheduledOrderControls(
                     false);
             }
@@ -2644,7 +2670,7 @@ namespace FastOrder
 
         private async Task DispatchReservedSliceAsync(
             CoreWebView2 coreWebView,
-            ConfirmedOrderSnapshot snapshot,
+            OrderSession session,
             Order order,
             int slotNumber,
             long reservedQuantity,
@@ -2660,7 +2686,7 @@ namespace FastOrder
                 result =
                     await ExecuteClockDrivenSliceAttemptAsync(
                         coreWebView,
-                        snapshot,
+                        session,
                         order,
                         slotNumber,
                         cancellationToken);
@@ -2791,25 +2817,25 @@ namespace FastOrder
         private async Task<OfficialOrderUiBridgeResult>
             ExecuteClockDrivenSliceAttemptAsync(
                 CoreWebView2 coreWebView,
-                ConfirmedOrderSnapshot snapshot,
+                OrderSession session,
                 Order order,
                 int slotNumber,
                 CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!ReferenceEquals(
-                _confirmedOrderSnapshot,
-                snapshot) ||
-                !snapshot.HasValidFingerprint())
+            ConfirmedOrderSnapshot snapshot =
+                session.ConfirmedOrderSnapshot;
+
+            if (!snapshot.HasValidFingerprint())
             {
                 return new OfficialOrderUiBridgeResult
                 {
                     Status =
-                        "CONFIRMED_ORDER_CHANGED",
+                        "SESSION_SNAPSHOT_INVALID",
 
                     Reason =
-                        "Confirmed order changed before scheduled slot."
+                        "The session-owned confirmed order snapshot is invalid."
                 };
             }
 
@@ -3101,10 +3127,7 @@ namespace FastOrder
                     ScheduledOrderAttemptOutcome.RetryableFailure;
             }
 
-            if (!ReferenceEquals(
-                _confirmedOrderSnapshot,
-                snapshot) ||
-                !snapshot.HasValidFingerprint())
+            if (!snapshot.HasValidFingerprint())
             {
                 await TryClearOfficialPreparedStateAsync(
                     coreWebView,
@@ -3542,13 +3565,76 @@ namespace FastOrder
             };
         }
 
-        private bool TryGetValidatedConfirmedOrder(
+        private bool TryGetValidatedCurrentOrder(
             out ConfirmedOrderSnapshot? snapshot,
             out CreateOrderPayload? payload,
             out string errorMessage)
         {
             snapshot =
-                _confirmedOrderSnapshot;
+                _currentOrderSnapshot;
+
+            return TryGetValidatedSnapshotOrder(
+                snapshot,
+                requireFreshConfirmation: true,
+                out payload,
+                out errorMessage);
+        }
+
+        private static bool TryGetValidatedSessionOrder(
+            OrderSession session,
+            out ConfirmedOrderSnapshot? snapshot,
+            out CreateOrderPayload? payload,
+            out string errorMessage)
+        {
+            ArgumentNullException.ThrowIfNull(
+                session);
+
+            snapshot =
+                session.ConfirmedOrderSnapshot;
+
+            if (!TryGetValidatedSnapshotOrder(
+                snapshot,
+                requireFreshConfirmation: false,
+                out payload,
+                out errorMessage) ||
+                payload?.Order == null)
+            {
+                return false;
+            }
+
+            Order order =
+                payload.Order;
+
+            if (!string.Equals(
+                order.SymbolName,
+                session.SymbolName,
+                StringComparison.Ordinal) ||
+                !string.Equals(
+                    order.SymbolIsin,
+                    session.SymbolIsin,
+                    StringComparison.Ordinal) ||
+                order.Side != session.Side ||
+                order.Price != session.Price ||
+                order.Quantity != session.TotalQuantity)
+            {
+                payload =
+                    null;
+
+                errorMessage =
+                    "مقادیر Snapshot مستقل با هویت نشست تطبیق ندارد.";
+
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryGetValidatedSnapshotOrder(
+            ConfirmedOrderSnapshot? snapshot,
+            bool requireFreshConfirmation,
+            out CreateOrderPayload? payload,
+            out string errorMessage)
+        {
 
             payload =
                 null;
@@ -3576,7 +3662,8 @@ namespace FastOrder
                 DateTimeOffset.UtcNow -
                 snapshot.ConfirmedAtUtc;
 
-            if (confirmedAge >
+            if (requireFreshConfirmation &&
+                confirmedAge >
                 ConfirmedOrderLifetime)
             {
                 errorMessage =
@@ -3798,9 +3885,9 @@ namespace FastOrder
                 null;
         }
 
-        private void ClearConfirmedOrder()
+        private void ClearCurrentOrderConfirmation()
         {
-            _confirmedOrderSnapshot =
+            _currentOrderSnapshot =
                 null;
 
             PrepareOrderButton.IsEnabled =
@@ -4190,7 +4277,7 @@ namespace FastOrder
                 return;
             }
 
-            if (!TryGetValidatedConfirmedOrder(
+            if (!TryGetValidatedCurrentOrder(
                 out ConfirmedOrderSnapshot? snapshot,
                 out CreateOrderPayload? payload,
                 out string validationError) ||
@@ -4642,7 +4729,7 @@ namespace FastOrder
                 Browser.CoreWebView2 == null)
                 return;
 
-            ClearConfirmedOrder();
+            ClearCurrentOrderConfirmation();
 
             Browser.CoreWebView2.Reload();
         }
@@ -4667,9 +4754,9 @@ namespace FastOrder
                 return;
             }
 
-            if (_confirmedOrderSnapshot != null)
+            if (_currentOrderSnapshot != null)
             {
-                ClearConfirmedOrder();
+                ClearCurrentOrderConfirmation();
             }
 
             WriteLog("");

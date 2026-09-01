@@ -71,6 +71,20 @@ namespace FastOrder
                 StringComparison.Ordinal);
         }
 
+        public ConfirmedOrderSnapshot CreateIndependentCopy()
+        {
+            if (!HasValidFingerprint())
+            {
+                throw new InvalidOperationException(
+                    "Cannot copy a confirmed order snapshot with an invalid fingerprint.");
+            }
+
+            return new ConfirmedOrderSnapshot(
+                PayloadJson,
+                Fingerprint,
+                ConfirmedAtUtc);
+        }
+
         private static string ComputeFingerprint(
             string payloadJson)
         {

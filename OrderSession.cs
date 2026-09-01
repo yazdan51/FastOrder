@@ -103,7 +103,7 @@ namespace FastOrder
                 endTime;
 
             ConfirmedOrderSnapshot =
-                confirmedOrderSnapshot;
+                confirmedOrderSnapshot.CreateIndependentCopy();
 
             CreatedAt =
                 DateTimeOffset.Now;
