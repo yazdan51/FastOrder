@@ -330,17 +330,17 @@ namespace FastOrder
         } = new BrokerProfile(
             PishroKamanId,
             "پیشرو — کمان",
-            "https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81",
-            "https://kaman.pishrobroker.ir",
-            "kaman.pishrobroker.ir",
+            "https://mobile.pishrobroker.ir/",
+            "https://mobile.pishrobroker.ir",
+            "mobile.pishrobroker.ir",
             supportsOfficialOrderUiAutomation: true,
             additionalTrustedOrigins: new[]
             {
-                "https://mobile.pishrobroker.ir"
+                "https://kaman.pishrobroker.ir"
             },
             additionalMonitoredHosts: new[]
             {
-                "mobile.pishrobroker.ir"
+                "kaman.pishrobroker.ir"
             });
 
         public static IReadOnlyList<BrokerProfile> All
