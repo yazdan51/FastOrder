@@ -23,7 +23,7 @@ commit that contains the implementation.
 | 75 — Session model + session list UI | Completed | 2026-09-01 | `b5cfd60ecc580a9069f89a931b6ae77a5ab3e776` |
 | 75.1 — Exchange-synchronized scheduler clock | Completed | 2026-09-01 | `35d004d4b777ddb3c2fa48f81293e822c5e155d0` |
 | 76 — Move confirmation ownership into sessions | Completed | 2026-09-01 | `755e8355aa7d3b8642e4422e1806671a9ec84770` |
-| 77 — Central Official UI Dispatcher | Not started | — | — |
+| 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
 | 78 — Global next-due priority queue | Not started | — | — |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
@@ -237,9 +237,72 @@ commit that contains the implementation.
   the existing `sent`/`in-flight` accounting remain on the same execution path.
 - No live order was sent during Stage 76 verification.
 
+## Stage 77 — Central Official UI Dispatcher
+
+**Status:** Completed on 2026-09-01
+
+**Commit:** `71c4a0874c91afe507dd5ea507681f75a983841c` (`Centralize official EasyTrader UI dispatch`)
+
+### Delivered changes
+
+- Added `OfficialOrderUiDispatcher`, a single asynchronous gate for every short operation that
+  reads or mutates the shared official EasyTrader order-form DOM.
+- Added an explicit access guard to the low-level prepare, clear, trusted-click, and Prime helpers
+  so future code cannot call those DOM operations outside the central dispatcher.
+- Routed Current Order Setup open/read operations, scheduled pre-warm, atomic scheduled submit,
+  Prime Until Ready, the retained legacy guarded submit helper, and prepare-only Dry-Run probes
+  through the same dispatcher.
+- Kept prepare/verify/submit/cleanup inside one critical section for the active scheduled click,
+  then released the dispatcher before separately running Prime Until Ready.
+- Preserved the immediate final verification in `BuildSubmitScript`: nonce, symbol, ISIN, price,
+  and quantity are rechecked before the official submit button is clicked exactly once.
+- Added session-local fail-closed handling for final symbol, ISIN, price, or quantity mismatch;
+  the affected session becomes `Failed`, its reservation is released, and no later slot for that
+  session is launched.
+- Made dispatcher failure isolation explicit: every operation releases the gate in `finally`, and
+  a failed operation does not poison later queued work.
+- Added non-sensitive dispatcher diagnostics for queue wait and operation duration.
+- Added a temporary WebView overlay only while the dispatcher owns the critical section, blocking
+  manual DOM changes during that short operation and disappearing immediately after release.
+
+### Changed files
+
+- `OfficialOrderUiDispatcher.cs` (new)
+- `MainWindow.xaml`
+- `MainWindow.xaml.cs`
+
+### Preserved behavior and non-goals
+
+- Only one session is executable at a time; concurrent session execution remains deferred to
+  Stage 79.
+- The global next-due priority queue and cross-session priming remain deferred to Stage 78.
+- TSETMC exchange-clock synchronization, freshness checks, and fail-closed timing are unchanged.
+- The scheduler's one-second target-slot generation and missed-slot no-burst rule are unchanged.
+- Prime Until Ready keeps its existing retry deadline and form-preparation behavior.
+- Existing `sent` and `in-flight` reservation and settlement accounting remains authoritative.
+- A slice is moved to `sent` only after the existing `CLICKED` result; a verification mismatch is
+  not counted as sent and is not automatically retried.
+- The final action remains the official EasyTrader UI click; no direct broker API order path or
+  credential access was introduced.
+
+### Verification
+
+- Debug build passed with zero compilation errors.
+- Release build passed with zero compilation errors.
+- The only build warning was `NU1900`, caused by the unavailable NuGet vulnerability feed.
+- An isolated eight-operation concurrency probe observed `max-active=1`.
+- The probe injected one expected operation failure, confirmed that the gate was released, and
+  successfully ran a subsequent operation with `pending=0`.
+- A second access probe confirmed that low-level DOM access is rejected outside the dispatcher and
+  succeeds while the dispatcher owns the operation.
+- Static route checks confirmed that scheduled atomic submit still calls
+  `BuildAtomicScheduledSubmitScript`, which composes the existing prepare and immediate guarded
+  `BuildSubmitScript` verification path.
+- No live order was sent during Stage 77 verification.
+
 ## Template for future stages
 
-Copy this structure when completing Stage 77 and later stages:
+Copy this structure when completing Stage 78 and later stages:
 
 ```markdown
 ## Stage NN — Name
