@@ -424,6 +424,33 @@
                                   VerticalAlignment="Stretch"
                                   NavigationStarting="Browser_NavigationStarting"
                                   NavigationCompleted="Browser_NavigationCompleted"/>
+
+                    <Border x:Name="OfficialUiDispatcherOverlay"
+                            Grid.Row="1"
+                            Panel.ZIndex="10"
+                            Background="#990B1720"
+                            Visibility="Collapsed"
+                            AutomationProperties.Name="عملیات کنترل‌شده EasyTrader">
+                        <Border HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Padding="24,16"
+                                CornerRadius="8"
+                                Background="#EFFFFFFF">
+                            <StackPanel HorizontalAlignment="Center">
+                                <ProgressBar Width="220"
+                                             Height="5"
+                                             IsIndeterminate="True"/>
+                                <TextBlock x:Name="OfficialUiDispatcherOverlayText"
+                                           Margin="0,12,0,0"
+                                           Text="در حال اجرای عملیات رسمی EasyTrader..."
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FF263238"/>
+                            </StackPanel>
+                        </Border>
+                    </Border>
                 </Grid>
             </Border>
         </Grid>

@@ -69,6 +69,9 @@ namespace FastOrder
         private readonly ExchangeClock _exchangeClock =
             new ExchangeClock();
 
+        private readonly OfficialOrderUiDispatcher _officialUiDispatcher =
+            new OfficialOrderUiDispatcher();
+
         private readonly CancellationTokenSource _applicationCancellation =
             new CancellationTokenSource();
 
@@ -129,11 +132,65 @@ namespace FastOrder
             SessionDataGrid.ItemsSource =
                 _orderSessions;
 
+            _officialUiDispatcher.StateChanged +=
+                OfficialUiDispatcher_StateChanged;
+
             RestoreWindowLayout();
 
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
             StateChanged += MainWindow_StateChanged;
+        }
+
+        private void OfficialUiDispatcher_StateChanged(
+            object? sender,
+            OfficialUiDispatcherStateChangedEventArgs e)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(
+                    new Action(
+                        () => OfficialUiDispatcher_StateChanged(
+                            sender,
+                            e)));
+
+                return;
+            }
+
+            OfficialUiDispatcherOverlay.Visibility =
+                e.IsBusy
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+            if (e.IsBusy)
+            {
+                OfficialUiDispatcherOverlayText.Text =
+                    e.DisplayMessage;
+
+                WriteLog(
+                    "OFFICIAL UI DISPATCH ACQUIRED: " +
+                    e.OperationName +
+                    " | QUEUE WAIT MS: " +
+                    e.QueueDelay.TotalMilliseconds.ToString(
+                        "F1",
+                        CultureInfo.InvariantCulture));
+
+                return;
+            }
+
+            WriteLog(
+                "OFFICIAL UI DISPATCH RELEASED: " +
+                e.OperationName +
+                " | DURATION MS: " +
+                e.OperationDuration.TotalMilliseconds.ToString(
+                    "F1",
+                    CultureInfo.InvariantCulture) +
+                (string.IsNullOrWhiteSpace(
+                    e.FailureType)
+                    ? " | RESULT: COMPLETED"
+                    : " | RESULT: FAILED (" +
+                      e.FailureType +
+                      ")"));
         }
 
         private void RestoreWindowLayout()
@@ -425,59 +482,55 @@ namespace FastOrder
             {
                 ClearCurrentOrderConfirmation();
 
-                string json = await Browser.CoreWebView2.ExecuteScriptAsync(
-                    OfficialOrderUiBridge.BuildOpenCurrentSymbolBuyDialogScript());
+                CoreWebView2 coreWebView =
+                    Browser.CoreWebView2;
+
+                (OfficialOrderUiBridgeResult Result, bool TrustedClickFallbackUsed)
+                    dispatchResult =
+                        await _officialUiDispatcher.DispatchAsync(
+                            "open-current-order-form",
+                            "در حال بازکردن فرم رسمی خرید...",
+                            async cancellationToken =>
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+
+                                string json =
+                                    await coreWebView.ExecuteScriptAsync(
+                                        OfficialOrderUiBridge
+                                            .BuildOpenCurrentSymbolBuyDialogScript());
+
+                                OfficialOrderUiBridgeResult result =
+                                    OfficialOrderUiBridge.ParseResult(
+                                        json);
+
+                                bool trustedClickFallbackUsed =
+                                    false;
+
+                                if (result.HasStatus(
+                                    OfficialOrderUiBridge.DialogOpenRequestedStatus) &&
+                                    result.ClickX > 0 &&
+                                    result.ClickY > 0)
+                                {
+                                    trustedClickFallbackUsed =
+                                        true;
+
+                                    await DispatchTrustedLeftClickAsync(
+                                        coreWebView,
+                                        result.ClickX,
+                                        result.ClickY,
+                                        cancellationToken);
+                                }
+
+                                return (
+                                    Result: result,
+                                    TrustedClickFallbackUsed: trustedClickFallbackUsed);
+                            });
 
                 OfficialOrderUiBridgeResult result =
-                    OfficialOrderUiBridge.ParseResult(json);
+                    dispatchResult.Result;
 
-                bool trustedClickFallbackUsed = false;
-
-                if (result.HasStatus(OfficialOrderUiBridge.DialogOpenRequestedStatus) &&
-                    result.ClickX > 0 &&
-                    result.ClickY > 0)
-                {
-                    trustedClickFallbackUsed = true;
-
-                    string moveJson = JsonSerializer.Serialize(new
-                    {
-                        type = "mouseMoved",
-                        x = result.ClickX,
-                        y = result.ClickY,
-                        button = "none",
-                        clickCount = 0
-                    });
-
-                    string downJson = JsonSerializer.Serialize(new
-                    {
-                        type = "mousePressed",
-                        x = result.ClickX,
-                        y = result.ClickY,
-                        button = "left",
-                        clickCount = 1
-                    });
-
-                    string upJson = JsonSerializer.Serialize(new
-                    {
-                        type = "mouseReleased",
-                        x = result.ClickX,
-                        y = result.ClickY,
-                        button = "left",
-                        clickCount = 1
-                    });
-
-                    await Browser.CoreWebView2.CallDevToolsProtocolMethodAsync(
-                        "Input.dispatchMouseEvent",
-                        moveJson);
-
-                    await Browser.CoreWebView2.CallDevToolsProtocolMethodAsync(
-                        "Input.dispatchMouseEvent",
-                        downJson);
-
-                    await Browser.CoreWebView2.CallDevToolsProtocolMethodAsync(
-                        "Input.dispatchMouseEvent",
-                        upJson);
-                }
+                bool trustedClickFallbackUsed =
+                    dispatchResult.TrustedClickFallbackUsed;
 
                 WriteImportant("");
                 WriteImportant("========================================");
@@ -530,8 +583,21 @@ namespace FastOrder
 
             try
             {
-                string json = await Browser.CoreWebView2.ExecuteScriptAsync(
-                    OfficialOrderUiBridge.BuildReadCurrentOrderFormScript());
+                CoreWebView2 coreWebView =
+                    Browser.CoreWebView2;
+
+                string json =
+                    await _officialUiDispatcher.DispatchAsync(
+                        "read-current-order-form",
+                        "در حال خواندن فرم رسمی سفارش...",
+                        async cancellationToken =>
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            return await coreWebView.ExecuteScriptAsync(
+                                OfficialOrderUiBridge
+                                    .BuildReadCurrentOrderFormScript());
+                        });
 
                 OfficialOrderFormReadResult form =
                     OfficialOrderUiBridge.ParseOrderFormReadResult(json);
@@ -2056,58 +2122,54 @@ namespace FastOrder
                             .ToString(
                                 "N");
 
-                    try
-                    {
-                        DateTimeOffset preWarmStartedAt =
-                            GetFreshExchangeTime();
+                    DateTimeOffset preWarmStartedAt =
+                        GetFreshExchangeTime();
 
-                        OfficialOrderUiBridgeResult preWarmResult =
-                            await PrepareOfficialOrderFormAsync(
-                                coreWebView,
-                                CreateScheduledSliceOrder(
-                                    order,
-                                    Math.Min(
-                                        totalQuantity,
-                                        maxQuantityPerOrder)),
-                                preWarmNonce,
-                                cancellationSource.Token);
-
-                        DateTimeOffset preWarmCompletedAt =
-                            GetFreshExchangeTime();
-
-                        WriteImportant("");
-                        WriteImportant(
-                            "SCHEDULE PRE-WARM STATUS: " +
-                            preWarmResult.Status);
-                        WriteImportant(
-                            "SCHEDULE PRE-WARM DURATION MS: " +
-                            (preWarmCompletedAt -
-                                preWarmStartedAt)
-                                .TotalMilliseconds
-                                .ToString(
-                                    "F1",
-                                    System.Globalization.CultureInfo.InvariantCulture));
-
-                        if (!preWarmResult.HasStatus(
-                            OfficialOrderUiBridge.PreparedStatus))
-                        {
-                            session.SetState(
-                                OrderSessionState.Failed,
-                                "پیش‌آماده‌سازی ناموفق بود",
-                                "فرم رسمی خرید قبل از اولین اسلات آماده نشد.");
-
-                            WriteScheduledOrderStopped(
-                                "فرم رسمی خرید قبل از شروع زمان‌بندی آماده نشد.",
-                                "PRE-WARM FAILED BEFORE FIRST SLOT");
-
-                            return;
-                        }
-                    }
-                    finally
-                    {
-                        await TryClearOfficialPreparedStateAsync(
+                    OfficialOrderUiBridgeResult preWarmResult =
+                        await DispatchPrepareAndClearOfficialOrderFormAsync(
                             coreWebView,
-                                preWarmNonce);
+                            CreateScheduledSliceOrder(
+                                order,
+                                Math.Min(
+                                    totalQuantity,
+                                    maxQuantityPerOrder)),
+                            preWarmNonce,
+                            "session-pre-warm:" +
+                            session.SessionIdDisplay,
+                            "در حال آماده‌سازی فرم " +
+                            session.SymbolName +
+                            "...",
+                            cancellationSource.Token);
+
+                    DateTimeOffset preWarmCompletedAt =
+                        GetFreshExchangeTime();
+
+                    WriteImportant("");
+                    WriteImportant(
+                        "SCHEDULE PRE-WARM STATUS: " +
+                        preWarmResult.Status);
+                    WriteImportant(
+                        "SCHEDULE PRE-WARM DURATION MS: " +
+                        (preWarmCompletedAt -
+                        preWarmStartedAt)
+                            .TotalMilliseconds
+                            .ToString(
+                                "F1",
+                                System.Globalization.CultureInfo.InvariantCulture));
+
+                    if (!preWarmResult.HasStatus(
+                        OfficialOrderUiBridge.PreparedStatus))
+                    {
+                        session.SetState(
+                            OrderSessionState.Failed,
+                            "پیش‌آماده‌سازی ناموفق بود",
+                            "فرم رسمی خرید قبل از اولین اسلات آماده نشد.");
+
+                        WriteScheduledOrderStopped(
+                            "فرم رسمی خرید قبل از شروع زمان‌بندی آماده نشد.",
+                            "PRE-WARM FAILED BEFORE FIRST SLOT");
+
+                        return;
                     }
 
                     session.SetState(
@@ -2121,6 +2183,12 @@ namespace FastOrder
                 while (nextSlot <
                     endAt)
                 {
+                    if (session.State ==
+                        OrderSessionState.Failed)
+                    {
+                        break;
+                    }
+
                     cancellationSource.Token
                         .ThrowIfCancellationRequested();
 
@@ -2130,6 +2198,12 @@ namespace FastOrder
 
                     cancellationSource.Token
                         .ThrowIfCancellationRequested();
+
+                    if (session.State ==
+                        OrderSessionState.Failed)
+                    {
+                        break;
+                    }
 
                     DateTimeOffset slotStartedAt =
                         GetFreshExchangeTime();
@@ -2732,6 +2806,26 @@ namespace FastOrder
             onNotClicked(
                 reservedQuantity);
 
+            if (IsMandatoryPreSubmitVerificationFailure(
+                result))
+            {
+                string verificationError =
+                    OfficialOrderUiBridge.GetUserMessage(
+                        result.Status);
+
+                session.SetState(
+                    OrderSessionState.Failed,
+                    "عدم تطبیق نهایی فرم رسمی",
+                    verificationError);
+
+                WriteScheduledOrderStopped(
+                    "نشست " +
+                    session.SessionIdDisplay +
+                    " به دلیل عدم تطبیق نهایی فرم رسمی متوقف شد: " +
+                    verificationError,
+                    "MANDATORY PRE-SUBMIT VERIFICATION FAILED");
+            }
+
             WriteImportant(
                 "CLOCK SLOT " +
                 slotNumber +
@@ -2741,6 +2835,18 @@ namespace FastOrder
             WriteImportant(
                 "STATUS: " +
                 result.Status);
+        }
+
+        private static bool IsMandatoryPreSubmitVerificationFailure(
+            OfficialOrderUiBridgeResult result)
+        {
+            return
+                result.HasStatus(
+                    "SYMBOL_MISMATCH") ||
+                result.HasStatus(
+                    "INSTRUMENT_NOT_VERIFIED") ||
+                result.HasStatus(
+                    "ORDER_VALUES_CHANGED");
         }
 
         private static Order CreateScheduledSliceOrder(
@@ -2839,32 +2945,59 @@ namespace FastOrder
                 };
             }
 
-            string nonce =
-                Guid.NewGuid()
-                    .ToString(
-                        "N");
-
             try
             {
-                string resultJson =
-                    await coreWebView.ExecuteScriptAsync(
-                        OfficialOrderUiBridge
-                            .BuildAtomicScheduledSubmitScript(
-                                order,
-                                nonce));
-
-                // بعد از ExecuteScriptAsync دیگر cancellation بررسی نمی‌شود.
-                // چون JavaScript ممکن است کلیک رسمی را انجام داده باشد و
-                // نتیجه باید حتماً برای حسابداری sent/in-flight پردازش شود.
                 OfficialOrderUiBridgeResult result =
-                    OfficialOrderUiBridge.ParseResult(
-                        resultJson);
+                    await _officialUiDispatcher.DispatchAsync(
+                        "scheduled-submit:" +
+                        session.SessionIdDisplay +
+                        ":" +
+                        slotNumber,
+                        "در حال ارسال " +
+                        session.SymbolName +
+                        "...",
+                        async dispatcherCancellationToken =>
+                        {
+                            dispatcherCancellationToken
+                                .ThrowIfCancellationRequested();
 
-                WriteImportant(
-                    "ATOMIC UI SLOT " +
-                    slotNumber +
-                    ": " +
-                    result.Status);
+                            string nonce =
+                                Guid.NewGuid()
+                                    .ToString(
+                                        "N");
+
+                            try
+                            {
+                                string resultJson =
+                                    await coreWebView.ExecuteScriptAsync(
+                                        OfficialOrderUiBridge
+                                            .BuildAtomicScheduledSubmitScript(
+                                                order,
+                                                nonce));
+
+                                // بعد از ExecuteScriptAsync دیگر cancellation بررسی نمی‌شود.
+                                // چون JavaScript ممکن است کلیک رسمی را انجام داده باشد و
+                                // نتیجه باید حتماً برای حسابداری sent/in-flight پردازش شود.
+                                OfficialOrderUiBridgeResult dispatchResult =
+                                    OfficialOrderUiBridge.ParseResult(
+                                        resultJson);
+
+                                WriteImportant(
+                                    "ATOMIC UI SLOT " +
+                                    slotNumber +
+                                    ": " +
+                                    dispatchResult.Status);
+
+                                return dispatchResult;
+                            }
+                            finally
+                            {
+                                await TryClearOfficialPreparedStateCoreAsync(
+                                    coreWebView,
+                                    nonce);
+                            }
+                        },
+                        cancellationToken);
 
                 if (result.HasStatus(
                     OfficialOrderUiBridge.ClickedStatus))
@@ -2895,18 +3028,44 @@ namespace FastOrder
                         "Atomic scheduled UI action failed before a confirmed click."
                 };
             }
-            finally
-            {
-                await TryClearOfficialPreparedStateAsync(
-                    coreWebView,
-                    nonce);
-            }
         }
 
         private async Task PrimeNextScheduledOrderFormAsync(
             CoreWebView2 coreWebView,
             Order order)
         {
+            try
+            {
+                await _officialUiDispatcher.DispatchAsync(
+                    "prime-next-scheduled-form",
+                    "در حال آماده‌سازی فرم بعدی " +
+                    order.SymbolName +
+                    "...",
+                    async cancellationToken =>
+                    {
+                        await PrimeNextScheduledOrderFormCoreAsync(
+                            coreWebView,
+                            order,
+                            cancellationToken);
+
+                        return true;
+                    });
+            }
+            catch (Exception ex)
+            {
+                WriteImportant(
+                    "NEXT FORM PRIME DISPATCH ERROR: " +
+                    ex.Message);
+            }
+        }
+
+        private async Task PrimeNextScheduledOrderFormCoreAsync(
+            CoreWebView2 coreWebView,
+            Order order,
+            CancellationToken cancellationToken)
+        {
+            _officialUiDispatcher.VerifyAccess();
+
             try
             {
                 DateTimeOffset primeDeadline =
@@ -2920,6 +3079,8 @@ namespace FastOrder
                 while (DateTimeOffset.Now <
                     primeDeadline)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     string nonce =
                         Guid.NewGuid()
                             .ToString(
@@ -2938,7 +3099,7 @@ namespace FastOrder
                     if (prepareResult.HasStatus(
                         OfficialOrderUiBridge.PreparedStatus))
                     {
-                        await TryClearOfficialPreparedStateAsync(
+                        await TryClearOfficialPreparedStateCoreAsync(
                             coreWebView,
                             nonce);
 
@@ -2948,7 +3109,7 @@ namespace FastOrder
                         return;
                     }
 
-                    await TryClearOfficialPreparedStateAsync(
+                    await TryClearOfficialPreparedStateCoreAsync(
                         coreWebView,
                         nonce);
 
@@ -2978,44 +3139,11 @@ namespace FastOrder
                             ensureResult.ClickX > 0 &&
                             ensureResult.ClickY > 0)
                         {
-                            string moveJson = JsonSerializer.Serialize(new
-                            {
-                                type = "mouseMoved",
-                                x = ensureResult.ClickX,
-                                y = ensureResult.ClickY,
-                                button = "none",
-                                clickCount = 0
-                            });
-
-                            string downJson = JsonSerializer.Serialize(new
-                            {
-                                type = "mousePressed",
-                                x = ensureResult.ClickX,
-                                y = ensureResult.ClickY,
-                                button = "left",
-                                clickCount = 1
-                            });
-
-                            string upJson = JsonSerializer.Serialize(new
-                            {
-                                type = "mouseReleased",
-                                x = ensureResult.ClickX,
-                                y = ensureResult.ClickY,
-                                button = "left",
-                                clickCount = 1
-                            });
-
-                            await coreWebView.CallDevToolsProtocolMethodAsync(
-                                "Input.dispatchMouseEvent",
-                                moveJson);
-
-                            await coreWebView.CallDevToolsProtocolMethodAsync(
-                                "Input.dispatchMouseEvent",
-                                downJson);
-
-                            await coreWebView.CallDevToolsProtocolMethodAsync(
-                                "Input.dispatchMouseEvent",
-                                upJson);
+                            await DispatchTrustedLeftClickAsync(
+                                coreWebView,
+                                ensureResult.ClickX,
+                                ensureResult.ClickY,
+                                cancellationToken);
 
                             trustedBuyClickRequested =
                                 true;
@@ -3025,7 +3153,8 @@ namespace FastOrder
                         }
 
                         await Task.Delay(
-                            75);
+                            75,
+                            cancellationToken);
 
                         continue;
                     }
@@ -3034,7 +3163,8 @@ namespace FastOrder
                         OfficialOrderUiBridge.DialogAlreadyOpenStatus))
                     {
                         await Task.Delay(
-                            50);
+                            50,
+                            cancellationToken);
 
                         continue;
                     }
@@ -3043,7 +3173,8 @@ namespace FastOrder
                         OfficialOrderUiBridge.SymbolSelectionRequestedStatus))
                     {
                         await Task.Delay(
-                            75);
+                            75,
+                            cancellationToken);
 
                         continue;
                     }
@@ -3083,18 +3214,26 @@ namespace FastOrder
             // این مرحله نماد/ISIN را تطبیق می‌دهد و تعداد و قیمت را در فرم
             // رسمی EasyTrader قرار می‌دهد؛ هنوز هیچ POST ارسال نمی‌شود.
             OfficialOrderUiBridgeResult prepareResult =
-                await PrepareOfficialOrderFormAsync(
-                    coreWebView,
-                    order,
-                    preparationNonce,
+                await _officialUiDispatcher.DispatchAsync(
+                    "legacy-scheduled-prepare",
+                    "در حال آماده‌سازی فرم رسمی " +
+                    order.SymbolName +
+                    "...",
+                    dispatcherCancellationToken =>
+                        PrepareOfficialOrderFormCoreAsync(
+                            coreWebView,
+                            order,
+                            preparationNonce,
+                            dispatcherCancellationToken),
                     cancellationToken);
 
             if (!prepareResult.HasStatus(
                 OfficialOrderUiBridge.PreparedStatus))
             {
-                await TryClearOfficialPreparedStateAsync(
+                await DispatchClearOfficialPreparedStateAsync(
                     coreWebView,
-                    preparationNonce);
+                    preparationNonce,
+                    "legacy-scheduled-clear");
 
                 WriteImportant(
                     "RESULT: RETRYABLE BEFORE POST");
@@ -3114,9 +3253,10 @@ namespace FastOrder
             if (GetFreshExchangeTime() >=
                 endAt)
             {
-                await TryClearOfficialPreparedStateAsync(
+                await DispatchClearOfficialPreparedStateAsync(
                     coreWebView,
-                    preparationNonce);
+                    preparationNonce,
+                    "legacy-scheduled-clear");
 
                 WriteImportant(
                     "RESULT: WINDOW EXPIRED BEFORE POST");
@@ -3129,9 +3269,10 @@ namespace FastOrder
 
             if (!snapshot.HasValidFingerprint())
             {
-                await TryClearOfficialPreparedStateAsync(
+                await DispatchClearOfficialPreparedStateAsync(
                     coreWebView,
-                    preparationNonce);
+                    preparationNonce,
+                    "legacy-scheduled-clear");
 
                 WriteImportant(
                     "RESULT: ORDER CHANGED BEFORE POST");
@@ -3175,10 +3316,22 @@ namespace FastOrder
             {
                 // تنها نقطه‌ای که اجازه فعال‌کردن دکمه رسمی «ارسال خرید» را دارد.
                 string submitResultJson =
-                    await coreWebView.ExecuteScriptAsync(
-                        OfficialOrderUiBridge.BuildSubmitScript(
-                            order,
-                            preparationNonce));
+                    await _officialUiDispatcher.DispatchAsync(
+                        "legacy-scheduled-submit",
+                        "در حال ارسال " +
+                        order.SymbolName +
+                        "...",
+                        async dispatcherCancellationToken =>
+                        {
+                            dispatcherCancellationToken
+                                .ThrowIfCancellationRequested();
+
+                            return await coreWebView.ExecuteScriptAsync(
+                                OfficialOrderUiBridge.BuildSubmitScript(
+                                    order,
+                                    preparationNonce));
+                        },
+                        cancellationToken);
 
                 submitResult =
                     OfficialOrderUiBridge.ParseResult(
@@ -3202,9 +3355,10 @@ namespace FastOrder
             {
                 ResetLiveSubmissionTracking();
 
-                await TryClearOfficialPreparedStateAsync(
+                await DispatchClearOfficialPreparedStateAsync(
                     coreWebView,
-                    preparationNonce);
+                    preparationNonce,
+                    "legacy-scheduled-clear");
 
                 WriteImportant(
                     "RESULT: RETRYABLE BEFORE POST");
@@ -3235,9 +3389,10 @@ namespace FastOrder
                     submissionId,
                     completionSource);
 
-            await TryClearOfficialPreparedStateAsync(
+            await DispatchClearOfficialPreparedStateAsync(
                 coreWebView,
-                preparationNonce);
+                preparationNonce,
+                "legacy-scheduled-clear");
 
             if (!observation.ResponseObserved ||
                 !observation.StatusCode.HasValue)
@@ -3427,13 +3582,70 @@ namespace FastOrder
         /// فرم رسمی خرید را پیدا یا باز می‌کند و تا آماده‌شدن آن تلاش می‌کند.
         /// خروجی PREPARED فقط آمادگی محلی فرم را نشان می‌دهد و به معنی ارسال نیست.
         /// </summary>
+        private Task<OfficialOrderUiBridgeResult>
+            DispatchPrepareAndClearOfficialOrderFormAsync(
+                CoreWebView2 coreWebView,
+                Order order,
+                string preparationNonce,
+                string operationName,
+                string displayMessage,
+                CancellationToken cancellationToken = default)
+        {
+            return _officialUiDispatcher.DispatchAsync(
+                operationName,
+                displayMessage,
+                async dispatcherCancellationToken =>
+                {
+                    try
+                    {
+                        return await PrepareOfficialOrderFormCoreAsync(
+                            coreWebView,
+                            order,
+                            preparationNonce,
+                            dispatcherCancellationToken);
+                    }
+                    finally
+                    {
+                        await TryClearOfficialPreparedStateCoreAsync(
+                            coreWebView,
+                            preparationNonce);
+                    }
+                },
+                cancellationToken);
+        }
+
+        private Task<bool> DispatchClearOfficialPreparedStateAsync(
+            CoreWebView2 coreWebView,
+            string preparationNonce,
+            string operationName,
+            CancellationToken cancellationToken = default)
+        {
+            return _officialUiDispatcher.DispatchAsync(
+                operationName,
+                "در حال پاک‌سازی وضعیت موقت فرم رسمی...",
+                async dispatcherCancellationToken =>
+                {
+                    dispatcherCancellationToken
+                        .ThrowIfCancellationRequested();
+
+                    await TryClearOfficialPreparedStateCoreAsync(
+                        coreWebView,
+                        preparationNonce);
+
+                    return true;
+                },
+                cancellationToken);
+        }
+
         private async Task<OfficialOrderUiBridgeResult>
-            PrepareOfficialOrderFormAsync(
+            PrepareOfficialOrderFormCoreAsync(
                 CoreWebView2 coreWebView,
                 Order order,
                 string preparationNonce,
                 CancellationToken cancellationToken = default)
         {
+            _officialUiDispatcher.VerifyAccess();
+
             const int maximumAttemptCount =
                 20;
 
@@ -3495,44 +3707,11 @@ namespace FastOrder
                     if (ensureResult.ClickX > 0 &&
                         ensureResult.ClickY > 0)
                     {
-                        string moveJson = JsonSerializer.Serialize(new
-                        {
-                            type = "mouseMoved",
-                            x = ensureResult.ClickX,
-                            y = ensureResult.ClickY,
-                            button = "none",
-                            clickCount = 0
-                        });
-
-                        string downJson = JsonSerializer.Serialize(new
-                        {
-                            type = "mousePressed",
-                            x = ensureResult.ClickX,
-                            y = ensureResult.ClickY,
-                            button = "left",
-                            clickCount = 1
-                        });
-
-                        string upJson = JsonSerializer.Serialize(new
-                        {
-                            type = "mouseReleased",
-                            x = ensureResult.ClickX,
-                            y = ensureResult.ClickY,
-                            button = "left",
-                            clickCount = 1
-                        });
-
-                        await coreWebView.CallDevToolsProtocolMethodAsync(
-                            "Input.dispatchMouseEvent",
-                            moveJson);
-
-                        await coreWebView.CallDevToolsProtocolMethodAsync(
-                            "Input.dispatchMouseEvent",
-                            downJson);
-
-                        await coreWebView.CallDevToolsProtocolMethodAsync(
-                            "Input.dispatchMouseEvent",
-                            upJson);
+                        await DispatchTrustedLeftClickAsync(
+                            coreWebView,
+                            ensureResult.ClickX,
+                            ensureResult.ClickY,
+                            cancellationToken);
                     }
 
                     await Task.Delay(
@@ -3563,6 +3742,59 @@ namespace FastOrder
                 Reason =
                     "Official buy dialog did not open within the allowed attempts."
             };
+        }
+
+        private async Task DispatchTrustedLeftClickAsync(
+            CoreWebView2 coreWebView,
+            double clickX,
+            double clickY,
+            CancellationToken cancellationToken)
+        {
+            _officialUiDispatcher.VerifyAccess();
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string moveJson = JsonSerializer.Serialize(new
+            {
+                type = "mouseMoved",
+                x = clickX,
+                y = clickY,
+                button = "none",
+                clickCount = 0
+            });
+
+            string downJson = JsonSerializer.Serialize(new
+            {
+                type = "mousePressed",
+                x = clickX,
+                y = clickY,
+                button = "left",
+                clickCount = 1
+            });
+
+            string upJson = JsonSerializer.Serialize(new
+            {
+                type = "mouseReleased",
+                x = clickX,
+                y = clickY,
+                button = "left",
+                clickCount = 1
+            });
+
+            await coreWebView.CallDevToolsProtocolMethodAsync(
+                "Input.dispatchMouseEvent",
+                moveJson);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await coreWebView.CallDevToolsProtocolMethodAsync(
+                "Input.dispatchMouseEvent",
+                downJson);
+
+            // Once the press is dispatched, release it even if cancellation is requested.
+            await coreWebView.CallDevToolsProtocolMethodAsync(
+                "Input.dispatchMouseEvent",
+                upJson);
         }
 
         private bool TryGetValidatedCurrentOrder(
@@ -3701,10 +3933,12 @@ namespace FastOrder
             return true;
         }
 
-        private async Task TryClearOfficialPreparedStateAsync(
+        private async Task TryClearOfficialPreparedStateCoreAsync(
             CoreWebView2 coreWebView,
             string nonce)
         {
+            _officialUiDispatcher.VerifyAccess();
+
             try
             {
                 await coreWebView.ExecuteScriptAsync(
@@ -4343,17 +4577,15 @@ namespace FastOrder
                     DateTimeOffset.Now;
 
                 OfficialOrderUiBridgeResult setupResult =
-                    await PrepareOfficialOrderFormAsync(
+                    await DispatchPrepareAndClearOfficialOrderFormAsync(
                         coreWebView,
                         order,
-                        setupNonce);
+                        setupNonce,
+                        "dry-run-setup",
+                        "در حال آماده‌سازی Dry-Run فرم رسمی...");
 
                 DateTimeOffset setupCompletedAt =
                     DateTimeOffset.Now;
-
-                await TryClearOfficialPreparedStateAsync(
-                    coreWebView,
-                    setupNonce);
 
                 WriteImportant(
                     "DRY-RUN SETUP STATUS: " +
@@ -4456,10 +4688,6 @@ namespace FastOrder
             }
             finally
             {
-                await TryClearOfficialPreparedStateAsync(
-                    coreWebView,
-                    setupNonce);
-
                 _orderUiDryRunTimingActive =
                     false;
 
@@ -4477,25 +4705,55 @@ namespace FastOrder
             DateTimeOffset targetTime,
             DateTimeOffset requestTime)
         {
-            DateTimeOffset callStartedAt =
-                DateTimeOffset.Now;
+            (string ResultJson, DateTimeOffset CallStartedAt, DateTimeOffset CompletedAt)
+                dispatchResult =
+                    await _officialUiDispatcher.DispatchAsync(
+                        "dry-run-probe:" +
+                        probeNumber,
+                        "در حال اجرای Dry-Run فرم رسمی...",
+                        async cancellationToken =>
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            DateTimeOffset callStartedAt =
+                                DateTimeOffset.Now;
+
+                            try
+                            {
+                                string resultJson =
+                                    await coreWebView.ExecuteScriptAsync(
+                                        OfficialOrderUiBridge.BuildPrepareScript(
+                                            order,
+                                            nonce));
+
+                                DateTimeOffset completedAt =
+                                    DateTimeOffset.Now;
+
+                                return (
+                                    ResultJson: resultJson,
+                                    CallStartedAt: callStartedAt,
+                                    CompletedAt: completedAt);
+                            }
+                            finally
+                            {
+                                await TryClearOfficialPreparedStateCoreAsync(
+                                    coreWebView,
+                                    nonce);
+                            }
+                        });
 
             string resultJson =
-                await coreWebView.ExecuteScriptAsync(
-                    OfficialOrderUiBridge.BuildPrepareScript(
-                        order,
-                        nonce));
+                dispatchResult.ResultJson;
+
+            DateTimeOffset callStartedAt =
+                dispatchResult.CallStartedAt;
 
             DateTimeOffset completedAt =
-                DateTimeOffset.Now;
+                dispatchResult.CompletedAt;
 
             OfficialOrderUiBridgeResult result =
                 OfficialOrderUiBridge.ParseResult(
                     resultJson);
-
-            await TryClearOfficialPreparedStateAsync(
-                coreWebView,
-                nonce);
 
             double targetOffsetMs =
                 (targetTime - testStart)
@@ -5158,6 +5416,9 @@ namespace FastOrder
                 _applicationCancellation.Cancel();
 
                 _scheduledOrderCancellation?.Cancel();
+
+                _officialUiDispatcher.StateChanged -=
+                    OfficialUiDispatcher_StateChanged;
 
                 if (Browser?.CoreWebView2 != null)
                 {
