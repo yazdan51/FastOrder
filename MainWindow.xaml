@@ -359,7 +359,7 @@
                                 Click="SendLiveOrderButton_Click"/>
 
                         <Button x:Name="CancelScheduledOrderButton"
-                                Content="لغو زمان‌بندی"
+                                Content="لغو نشست انتخاب‌شده"
                                 Style="{StaticResource ControlButtonStyle}"
                                 IsEnabled="False"
                                 Background="#FF616161"
@@ -513,7 +513,7 @@
                                Foreground="#FF263238"/>
 
                     <TextBlock Grid.Column="1"
-                               Text="Stage 75 — فعلاً فقط یک نشست هم‌زمان اجرا می‌شود"
+                               Text="Stage 79 — اجرای هم‌زمان چند نشست برای کارگزاری فعال"
                                HorizontalAlignment="Right"
                                FlowDirection="RightToLeft"
                                Foreground="#FF607D8B"
@@ -540,7 +540,8 @@
                           VerticalScrollBarVisibility="Auto"
                           FlowDirection="RightToLeft"
                           SelectionMode="Single"
-                          SelectionUnit="FullRow">
+                          SelectionUnit="FullRow"
+                          SelectionChanged="SessionDataGrid_SelectionChanged">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="#"
                                             Binding="{Binding CreationSequence}"
@@ -593,6 +594,32 @@
                                             Binding="{Binding LastStatus}"
                                             MinWidth="180"
                                             Width="2*"/>
+                        <DataGridTemplateColumn Header="عملیات"
+                                                MinWidth="190"
+                                                Width="Auto">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal"
+                                                FlowDirection="RightToLeft">
+                                        <Button Content="مکث"
+                                                Margin="2"
+                                                Padding="8,3"
+                                                ToolTip="فقط ایجاد اسلات جدید این نشست را متوقف می‌کند."
+                                                Click="PauseOrderSessionButton_Click"/>
+                                        <Button Content="ادامه"
+                                                Margin="2"
+                                                Padding="8,3"
+                                                ToolTip="نشست متوقف را از اولین اسلات آینده ادامه می‌دهد."
+                                                Click="ResumeOrderSessionButton_Click"/>
+                                        <Button Content="لغو"
+                                                Margin="2"
+                                                Padding="8,3"
+                                                ToolTip="فقط همین نشست را لغو می‌کند؛ کلیک انجام‌شده قابل بازگردانی نیست."
+                                                Click="CancelOrderSessionButton_Click"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
                     </DataGrid.Columns>
                 </DataGrid>
             </Grid>

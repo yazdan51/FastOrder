@@ -1,6 +1,7 @@
 ﻿
 using Microsoft.Web.WebView2.Core;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -54,7 +55,16 @@ namespace FastOrder
         private readonly ObservableCollection<OrderSession> _orderSessions =
             new ObservableCollection<OrderSession>();
         private long _nextOrderSessionSequence = 0;
-        private OrderSession? _activeOrderSession;
+        private readonly object _sessionExecutionsSyncRoot =
+            new object();
+        private readonly Dictionary<Guid, OrderSessionExecution>
+            _activeSessionExecutions =
+                new Dictionary<Guid, OrderSessionExecution>();
+        private bool _sessionCreationInProgress = false;
+        private readonly object _scheduledClockRefreshSyncRoot =
+            new object();
+        private CancellationTokenSource? _scheduledClockRefreshCancellation;
+        private Task? _scheduledClockRefreshTask;
         private bool _hasCurrentOrderSetup = false;
         private bool _liveSubmissionInProgress = false;
         private bool _liveOrderRequestObserved = false;
@@ -62,7 +72,6 @@ namespace FastOrder
         private string? _activeLiveSubmissionFingerprint;
         private TaskCompletionSource<LiveOrderNetworkObservation>?
             _activeLiveSubmissionCompletion;
-        private CancellationTokenSource? _scheduledOrderCancellation;
         private bool _scheduledOrderActive = false;
 
         private readonly ExchangeClock _exchangeClock =
@@ -247,7 +256,7 @@ namespace FastOrder
 
             PreviewOrderButton.IsEnabled =
                 orderUiAvailable &&
-                !_scheduledOrderActive &&
+                !_sessionCreationInProgress &&
                 !_liveSubmissionInProgress;
 
             OrderUiDryRunTimingButton.IsEnabled =
@@ -257,7 +266,7 @@ namespace FastOrder
                 _currentOrderSnapshot != null;
 
             if (orderUiAvailable &&
-                !_scheduledOrderActive &&
+                !_sessionCreationInProgress &&
                 !_liveSubmissionInProgress &&
                 string.Equals(
                     _selectedBroker.Id,
@@ -660,9 +669,10 @@ namespace FastOrder
             object sender,
             RoutedEventArgs e)
         {
-            if (_scheduledOrderActive || _liveSubmissionInProgress)
+            if (_sessionCreationInProgress ||
+                _liveSubmissionInProgress)
             {
-                SetStatus("زمان‌بندی یا ارسال قبلی هنوز فعال است.");
+                SetStatus("ایجاد نشست یا عملیات ارسال قبلی هنوز فعال است.");
                 return;
             }
 
@@ -789,9 +799,10 @@ namespace FastOrder
             object sender,
             RoutedEventArgs e)
         {
-            if (_scheduledOrderActive || _liveSubmissionInProgress)
+            if (_sessionCreationInProgress ||
+                _liveSubmissionInProgress)
             {
-                SetStatus("زمان‌بندی یا ارسال قبلی هنوز فعال است.");
+                SetStatus("ایجاد نشست یا عملیات ارسال قبلی هنوز فعال است.");
                 return;
             }
 
@@ -2028,18 +2039,22 @@ namespace FastOrder
                 return;
             }
 
-            // قفل هم‌زمانی مانع ایجاد دو چرخه ارسال از یک پنجره می‌شود.
-            if (_scheduledOrderActive ||
+            // ساخت Snapshot/پنجره تأیید باید تک‌ورودی بماند، اما وجود نشست‌های
+            // زمان‌بندی‌شده دیگر مانع ایجاد نشست جدید برای همین کارگزاری نیست.
+            if (_sessionCreationInProgress ||
                 _liveSubmissionInProgress)
             {
                 SetStatus(
-                    "یک زمان‌بندی یا ارسال واقعی در حال اجرا است.");
+                    "تأیید یا ارسال کنترل‌شده دیگری در حال انجام است.");
 
                 return;
             }
 
-            SendLiveOrderButton.IsEnabled =
+            _sessionCreationInProgress =
                 true;
+
+            SendLiveOrderButton.IsEnabled =
+                false;
 
             OrderSession? createdSession =
                 null;
@@ -2301,17 +2316,17 @@ namespace FastOrder
                 // از این نقطه به بعد، چرخه زمان‌بندی فقط از Snapshot خود نشست
                 // استفاده می‌کند و به وضعیت قابل‌تغییر فرم جاری وابسته نیست.
                 SetStatus(
-                    "نشست ایجاد شد؛ در حال ورود به زمان‌بند تک‌جلسه‌ای...");
+                    "نشست ایجاد شد؛ در حال ورود به هماهنگ‌کننده چندنشستی...");
 
                 WriteImportant(
-                    "LIVE FLOW TRACE: ENTERING SCHEDULER");
+                    "LIVE FLOW TRACE: ENTERING SCHEDULER COORDINATOR");
 
-                await RunScheduledOrderAsync(
+                RegisterScheduledOrderSession(
                     coreWebView,
                     createdSession);
 
                 WriteImportant(
-                    "LIVE FLOW TRACE: SCHEDULER RETURNED");
+                    "LIVE FLOW TRACE: SCHEDULER ACCEPTED SESSION");
             }
             catch (Exception ex)
             {
@@ -2319,8 +2334,6 @@ namespace FastOrder
                     OrderSessionState.Failed,
                     "خطای داخلی پیش از اجرای کامل نشست",
                     "مسیر کنترل‌شده پیش از تکمیل نشست متوقف شد.");
-
-                ResetLiveSubmissionTracking();
 
                 WriteImportant("");
                 WriteImportant("========================================");
@@ -2339,11 +2352,227 @@ namespace FastOrder
                 WriteLiveSubmissionBlocked(
                     "خطای داخلی در مسیر کنترل‌شده رخ داد؛ جزئیات فنی در Important Log ثبت شد.");
 
-                if (_currentOrderSnapshot != null)
+            }
+            finally
+            {
+                _sessionCreationInProgress =
+                    false;
+
+                SetScheduledOrderControls(
+                    _scheduledOrderActive);
+            }
+        }
+
+        private void RegisterScheduledOrderSession(
+            CoreWebView2 coreWebView,
+            OrderSession session)
+        {
+            ArgumentNullException.ThrowIfNull(
+                coreWebView);
+
+            ArgumentNullException.ThrowIfNull(
+                session);
+
+            OrderSessionExecution execution =
+                new OrderSessionExecution(
+                    session);
+
+            lock (_sessionExecutionsSyncRoot)
+            {
+                if (!_activeSessionExecutions.TryAdd(
+                    session.SessionId,
+                    execution))
                 {
-                    SendLiveOrderButton.IsEnabled =
-                        true;
+                    execution.Dispose();
+
+                    throw new InvalidOperationException(
+                        "An active scheduler execution already exists for this session.");
                 }
+            }
+
+            RefreshScheduledOrderActivityState();
+            EnsureScheduledClockRefreshActive();
+            PulseAllSessionSchedulers();
+
+            Task schedulerTask =
+                RunScheduledOrderAsync(
+                    coreWebView,
+                    execution);
+
+            _ = ObserveScheduledOrderTaskAsync(
+                execution,
+                schedulerTask);
+        }
+
+        private async Task ObserveScheduledOrderTaskAsync(
+            OrderSessionExecution execution,
+            Task schedulerTask)
+        {
+            try
+            {
+                await schedulerTask;
+            }
+            catch (Exception ex)
+            {
+                if (execution.Session.State is not
+                    (OrderSessionState.Completed or
+                     OrderSessionState.Canceled or
+                     OrderSessionState.Failed))
+                {
+                    execution.Session.SetState(
+                        OrderSessionState.Failed,
+                        "خطای پیش‌بینی‌نشده در زمان‌بند نشست",
+                        ex.Message);
+                }
+
+                WriteImportant(
+                    "SESSION SCHEDULER UNOBSERVED ERROR: " +
+                    ex.Message);
+            }
+            finally
+            {
+                _globalNextDueQueue.RemoveSession(
+                    execution.Session.SessionId);
+
+                lock (_sessionExecutionsSyncRoot)
+                {
+                    if (_activeSessionExecutions.TryGetValue(
+                        execution.Session.SessionId,
+                        out OrderSessionExecution? currentExecution) &&
+                        ReferenceEquals(
+                            currentExecution,
+                            execution))
+                    {
+                        _activeSessionExecutions.Remove(
+                            execution.Session.SessionId);
+                    }
+                }
+
+                execution.TryMarkFinalized();
+                execution.Dispose();
+
+                RefreshScheduledOrderActivityState();
+                StopScheduledClockRefreshIfIdle();
+                PulseAllSessionSchedulers();
+            }
+        }
+
+        private bool TryGetActiveSessionExecution(
+            Guid sessionId,
+            out OrderSessionExecution? execution)
+        {
+            lock (_sessionExecutionsSyncRoot)
+            {
+                return _activeSessionExecutions.TryGetValue(
+                    sessionId,
+                    out execution);
+            }
+        }
+
+        private List<OrderSessionExecution> GetActiveSessionExecutionSnapshot()
+        {
+            lock (_sessionExecutionsSyncRoot)
+            {
+                return new List<OrderSessionExecution>(
+                    _activeSessionExecutions.Values);
+            }
+        }
+
+        private void PulseAllSessionSchedulers()
+        {
+            foreach (OrderSessionExecution execution in
+                GetActiveSessionExecutionSnapshot())
+            {
+                execution.Pulse();
+            }
+        }
+
+        private void RefreshScheduledOrderActivityState()
+        {
+            lock (_sessionExecutionsSyncRoot)
+            {
+                _scheduledOrderActive =
+                    _activeSessionExecutions.Count > 0;
+            }
+
+            SetScheduledOrderControls(
+                _scheduledOrderActive);
+        }
+
+        private void EnsureScheduledClockRefreshActive()
+        {
+            lock (_scheduledClockRefreshSyncRoot)
+            {
+                if (_scheduledClockRefreshTask != null)
+                {
+                    return;
+                }
+
+                _scheduledClockRefreshCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        _applicationCancellation.Token);
+
+                _scheduledClockRefreshTask =
+                    RefreshExchangeClockDuringScheduleAsync(
+                        _scheduledClockRefreshCancellation.Token);
+            }
+        }
+
+        private void StopScheduledClockRefreshIfIdle()
+        {
+            lock (_sessionExecutionsSyncRoot)
+            {
+                if (_activeSessionExecutions.Count > 0)
+                {
+                    return;
+                }
+            }
+
+            CancellationTokenSource? cancellationSource;
+            Task? refreshTask;
+
+            lock (_scheduledClockRefreshSyncRoot)
+            {
+                cancellationSource =
+                    _scheduledClockRefreshCancellation;
+
+                refreshTask =
+                    _scheduledClockRefreshTask;
+
+                _scheduledClockRefreshCancellation =
+                    null;
+
+                _scheduledClockRefreshTask =
+                    null;
+            }
+
+            if (cancellationSource == null ||
+                refreshTask == null)
+            {
+                return;
+            }
+
+            cancellationSource.Cancel();
+
+            _ = DisposeScheduledClockRefreshAsync(
+                refreshTask,
+                cancellationSource);
+        }
+
+        private static async Task DisposeScheduledClockRefreshAsync(
+            Task refreshTask,
+            CancellationTokenSource cancellationSource)
+        {
+            try
+            {
+                await refreshTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                cancellationSource.Dispose();
             }
         }
 
@@ -2355,8 +2584,14 @@ namespace FastOrder
         /// </summary>
         private async Task RunScheduledOrderAsync(
             CoreWebView2 coreWebView,
-            OrderSession session)
+            OrderSessionExecution execution)
         {
+            ArgumentNullException.ThrowIfNull(
+                execution);
+
+            OrderSession session =
+                execution.Session;
+
             ArgumentNullException.ThrowIfNull(
                 session);
 
@@ -2444,50 +2679,16 @@ namespace FastOrder
                 return;
             }
 
-            _activeOrderSession =
-                session;
-
-            using CancellationTokenSource cancellationSource =
-                new CancellationTokenSource();
-
-            using CancellationTokenSource exchangeClockRefreshCancellation =
+            using CancellationTokenSource scheduleLifetimeCancellation =
                 CancellationTokenSource.CreateLinkedTokenSource(
-                    cancellationSource.Token,
+                    execution.CancellationToken,
                     _applicationCancellation.Token);
 
-            Task exchangeClockRefreshTask =
-                RefreshExchangeClockDuringScheduleAsync(
-                    exchangeClockRefreshCancellation.Token);
-
-            _scheduledOrderCancellation =
-                cancellationSource;
-
-            _scheduledOrderActive =
-                true;
-
-            SetScheduledOrderControls(
-                true);
+            CancellationToken scheduleCancellationToken =
+                scheduleLifetimeCancellation.Token;
 
             long totalQuantity =
                 order.Quantity;
-
-            long sentQuantity =
-                0;
-
-            long inFlightQuantity =
-                0;
-
-            int clickedOrderCount =
-                0;
-
-            int slotNumber =
-                0;
-
-            long nextSliceSequence =
-                1;
-
-            object accountingLock =
-                new object();
 
             System.Collections.Generic.List<Task>
                 activeDispatchTasks =
@@ -2497,26 +2698,13 @@ namespace FastOrder
                 DateTimeOffset? nextDueAt,
                 string status)
             {
-                long sentSnapshot;
-                long inFlightSnapshot;
-                int clickedSnapshot;
-
-                lock (accountingLock)
-                {
-                    sentSnapshot =
-                        sentQuantity;
-
-                    inFlightSnapshot =
-                        inFlightQuantity;
-
-                    clickedSnapshot =
-                        clickedOrderCount;
-                }
+                OrderSessionAccountingSnapshot accounting =
+                    execution.GetAccountingSnapshot();
 
                 session.UpdateProgress(
-                    sentSnapshot,
-                    inFlightSnapshot,
-                    clickedSnapshot,
+                    accounting.SentQuantity,
+                    accounting.InFlightQuantity,
+                    accounting.ClickedOrderCount,
                     nextDueAt,
                     status);
             }
@@ -2567,11 +2755,11 @@ namespace FastOrder
                     session.SessionId);
 
                 _globalNextDueQueue.Enqueue(
-                    new ScheduledSlice(
-                        session,
+                    execution.CreateNextSlice(
                         startAt,
-                        DefaultScheduledSlicePriority,
-                        nextSliceSequence++));
+                        DefaultScheduledSlicePriority));
+
+                PulseAllSessionSchedulers();
 
                 WriteImportant(
                     "GLOBAL NEXT-DUE ENQUEUED: " +
@@ -2582,18 +2770,10 @@ namespace FastOrder
                         CultureInfo.InvariantCulture));
 
                 // PRE-WARM:
-                // فرم رسمی اولین slice سراسری کمی قبل از زمان هدف آماده می‌شود.
-                // این مرحله فقط prepare است و هیچ کلیک ارسال انجام نمی‌دهد.
-                if (!_globalNextDueQueue.TryPeek(
-                    out ScheduledSlice? initialNextDueSlice) ||
-                    initialNextDueSlice == null)
-                {
-                    throw new InvalidOperationException(
-                        "صف سراسری next-due پیش از pre-warm خالی است.");
-                }
-
+                // هر نشست فقط Snapshot مستقل خودش را آماده می‌کند. ترتیب کلیک‌ها
+                // همچنان توسط صف سراسری و Dispatcher واحد تعیین می‌شود.
                 DateTimeOffset preWarmAt =
-                    initialNextDueSlice.TargetTime -
+                    startAt -
                     ScheduledOrderPreWarmLeadTime;
 
                 WriteImportant(
@@ -2601,34 +2781,39 @@ namespace FastOrder
                     preWarmAt.ToString(
                         "HH:mm:ss.fff"));
 
-                await DelayUntilExchangeTimeAsync(
-                    preWarmAt,
-                    cancellationSource.Token);
+                while (execution.IsPaused ||
+                    GetFreshExchangeTime() < preWarmAt)
+                {
+                    if (execution.IsPaused)
+                    {
+                        await execution.WaitForWakeAsync(
+                            TimeSpan.FromSeconds(1),
+                            scheduleCancellationToken);
 
-                cancellationSource.Token
+                        continue;
+                    }
+
+                    await WaitUntilExchangeTimeOrWakeAsync(
+                        preWarmAt,
+                        execution,
+                        scheduleCancellationToken);
+                }
+
+                scheduleCancellationToken
                     .ThrowIfCancellationRequested();
 
                 if (GetFreshExchangeTime() <
                     endAt)
                 {
-                    if (!TryCreateGloballyNextDueOrder(
-                        out ScheduledSlice? preWarmSlice,
-                        out Order? preWarmOrder,
-                        out string preWarmQueueError) ||
-                        preWarmSlice == null ||
-                        preWarmOrder == null)
-                    {
-                        session.SetState(
-                            OrderSessionState.Failed,
-                            "صف سراسری برای pre-warm معتبر نیست",
-                            preWarmQueueError);
+                    long preWarmQuantity =
+                        Math.Min(
+                            totalQuantity,
+                            maxQuantityPerOrder);
 
-                        WriteScheduledOrderStopped(
-                            preWarmQueueError,
-                            "GLOBAL PRE-WARM QUEUE INVALID");
-
-                        return;
-                    }
+                    Order preWarmOrder =
+                        CreateScheduledSliceOrder(
+                            order,
+                            preWarmQuantity);
 
                     session.SetState(
                         OrderSessionState.PreWarming,
@@ -2648,11 +2833,11 @@ namespace FastOrder
                             preWarmOrder,
                             preWarmNonce,
                             "session-pre-warm:" +
-                            preWarmSlice.Session.SessionIdDisplay,
+                            session.SessionIdDisplay,
                             "در حال آماده‌سازی فرم " +
-                            preWarmSlice.Session.SymbolName +
+                            session.SymbolName +
                             "...",
-                            cancellationSource.Token);
+                            scheduleCancellationToken);
 
                     DateTimeOffset preWarmCompletedAt =
                         GetFreshExchangeTime();
@@ -2685,14 +2870,21 @@ namespace FastOrder
                         return;
                     }
 
-                    session.SetState(
-                        OrderSessionState.Ready,
-                        "فرم رسمی برای اولین اسلات آماده است");
+                    if (execution.IsPaused)
+                    {
+                        session.SetState(
+                            OrderSessionState.Paused,
+                            "متوقف موقت؛ فرم رسمی آماده است");
+                    }
+                    else
+                    {
+                        session.SetState(
+                            OrderSessionState.Ready,
+                            "فرم رسمی برای اولین اسلات آماده است");
+                    }
                 }
 
-                while (_globalNextDueQueue.TryPeek(
-                    out ScheduledSlice? nextDueSlice) &&
-                    nextDueSlice != null)
+                while (true)
                 {
                     if (session.State ==
                         OrderSessionState.Failed)
@@ -2700,26 +2892,94 @@ namespace FastOrder
                         break;
                     }
 
-                    cancellationSource.Token
+                    scheduleCancellationToken
                         .ThrowIfCancellationRequested();
+
+                    DateTimeOffset schedulerNow =
+                        GetFreshExchangeTime();
+
+                    if (schedulerNow >=
+                        endAt)
+                    {
+                        execution.MarkWindowClosed();
+                        break;
+                    }
+
+                    if (execution.IsPaused)
+                    {
+                        _globalNextDueQueue.RemoveSession(
+                            session.SessionId);
+
+                        await execution.WaitForWakeAsync(
+                            TimeSpan.FromSeconds(1),
+                            scheduleCancellationToken);
+
+                        continue;
+                    }
+
+                    if (!_globalNextDueQueue.TryPeek(
+                        out ScheduledSlice? nextDueSlice) ||
+                        nextDueSlice == null)
+                    {
+                        OrderSessionAccountingSnapshot accounting =
+                            execution.GetAccountingSnapshot();
+
+                        if (accounting.SentQuantity >=
+                            totalQuantity)
+                        {
+                            break;
+                        }
+
+                        await execution.WaitForWakeAsync(
+                            TimeSpan.FromMilliseconds(100),
+                            scheduleCancellationToken);
+
+                        continue;
+                    }
 
                     if (!ReferenceEquals(
                         nextDueSlice.Session,
                         session))
                     {
-                        throw new InvalidOperationException(
-                            "Stage 78 only schedules the active session; " +
-                            "concurrent session execution starts in Stage 79.");
+                        TimeSpan foreignSliceWait =
+                            nextDueSlice.TargetTime -
+                            schedulerNow;
+
+                        if (foreignSliceWait <=
+                            TimeSpan.Zero)
+                        {
+                            foreignSliceWait =
+                                TimeSpan.FromMilliseconds(10);
+                        }
+                        else if (foreignSliceWait >
+                            TimeSpan.FromSeconds(1))
+                        {
+                            foreignSliceWait =
+                                TimeSpan.FromSeconds(1);
+                        }
+
+                        await execution.WaitForWakeAsync(
+                            foreignSliceWait,
+                            scheduleCancellationToken);
+
+                        continue;
                     }
 
                     DateTimeOffset nextSlot =
                         nextDueSlice.TargetTime;
 
-                    await DelayUntilExchangeTimeAsync(
+                    bool queueChanged =
+                        await WaitUntilExchangeTimeOrWakeAsync(
                         nextSlot,
-                        cancellationSource.Token);
+                        execution,
+                        scheduleCancellationToken);
 
-                    cancellationSource.Token
+                    if (queueChanged)
+                    {
+                        continue;
+                    }
+
+                    scheduleCancellationToken
                         .ThrowIfCancellationRequested();
 
                     if (session.State ==
@@ -2737,6 +2997,15 @@ namespace FastOrder
                         break;
                     }
 
+                    if (!_globalNextDueQueue.TryPeek(
+                        out ScheduledSlice? currentHeadSlice) ||
+                        !ReferenceEquals(
+                            currentHeadSlice,
+                            nextDueSlice))
+                    {
+                        continue;
+                    }
+
                     if (!_globalNextDueQueue.TryDequeue(
                         out ScheduledSlice? dequeuedSlice) ||
                         !ReferenceEquals(
@@ -2746,6 +3015,8 @@ namespace FastOrder
                         throw new InvalidOperationException(
                             "Global next-due queue changed before the due slice was dequeued.");
                     }
+
+                    PulseAllSessionSchedulers();
 
                     if (!ReferenceEquals(
                         session.ConfirmedOrderSnapshot,
@@ -2764,40 +3035,19 @@ namespace FastOrder
                         break;
                     }
 
-                    slotNumber++;
+                    int slotNumber =
+                        execution.NextSlotNumber();
 
-                    long currentQuantity;
-                    bool totalAlreadySent;
+                    OrderSessionAccountingSnapshot accountingBeforeReservation =
+                        execution.GetAccountingSnapshot();
 
-                    lock (accountingLock)
-                    {
-                        long availableQuantity =
-                            totalQuantity -
-                            sentQuantity -
-                            inFlightQuantity;
+                    bool totalAlreadySent =
+                        accountingBeforeReservation.SentQuantity >=
+                        totalQuantity;
 
-                        if (availableQuantity <= 0)
-                        {
-                            currentQuantity =
-                                0;
-                        }
-                        else
-                        {
-                            currentQuantity =
-                                Math.Min(
-                                    availableQuantity,
-                                    maxQuantityPerOrder);
-
-                            inFlightQuantity =
-                                checked(
-                                    inFlightQuantity +
-                                    currentQuantity);
-                        }
-
-                        totalAlreadySent =
-                            sentQuantity >=
-                            totalQuantity;
-                    }
+                    execution.TryReserve(
+                        maxQuantityPerOrder,
+                        out long currentQuantity);
 
                     DateTimeOffset? sessionNextDueAt =
                         null;
@@ -2838,11 +3088,11 @@ namespace FastOrder
                             endAt)
                         {
                             _globalNextDueQueue.Enqueue(
-                                new ScheduledSlice(
-                                    session,
+                                execution.CreateNextSlice(
                                     nextEligibleTarget,
-                                    DefaultScheduledSlicePriority,
-                                    nextSliceSequence++));
+                                    DefaultScheduledSlicePriority));
+
+                            PulseAllSessionSchedulers();
 
                             sessionNextDueAt =
                                 nextEligibleTarget;
@@ -2903,50 +3153,49 @@ namespace FastOrder
                             "RESERVED QUANTITY: " +
                             capturedQuantity);
 
+                        execution.DispatchStarted();
+
                         Task dispatchTask =
-                            DispatchReservedSliceAsync(
+                            DispatchReservedSliceForExecutionAsync(
                                 coreWebView,
+                                execution,
                                 session,
                                 currentOrder,
                                 capturedSlotNumber,
                                 capturedQuantity,
-                                accountingLock,
                                 CancellationToken.None,
                                 onClicked: quantity =>
                                 {
-                                    lock (accountingLock)
+                                    execution.CommitClicked(
+                                        quantity);
+
+                                    if (!execution.ShouldScheduleAnotherSlice())
                                     {
-                                        inFlightQuantity =
-                                            checked(
-                                                inFlightQuantity -
-                                                quantity);
+                                        _globalNextDueQueue.RemoveSession(
+                                            session.SessionId);
 
-                                        sentQuantity =
-                                            checked(
-                                                sentQuantity +
-                                                quantity);
-
-                                        clickedOrderCount++;
+                                        PulseAllSessionSchedulers();
                                     }
 
                                     UpdateSessionProgress(
-                                        capturedNextDueAt,
+                                        execution.IsPaused ||
+                                        execution.CancelRequested
+                                            ? null
+                                            : capturedNextDueAt,
                                         "اسلات " +
                                         capturedSlotNumber +
                                         " با کلیک رسمی ثبت شد");
                                 },
                                 onNotClicked: quantity =>
                                 {
-                                    lock (accountingLock)
-                                    {
-                                        inFlightQuantity =
-                                            checked(
-                                                inFlightQuantity -
-                                                quantity);
-                                    }
+                                    execution.ReleaseReservation(
+                                        quantity);
 
                                     UpdateSessionProgress(
-                                        capturedNextDueAt,
+                                        execution.IsPaused ||
+                                        execution.CancelRequested
+                                            ? null
+                                            : capturedNextDueAt,
                                         "اسلات " +
                                         capturedSlotNumber +
                                         " کلیک نشد؛ رزرو آزاد شد");
@@ -2954,20 +3203,12 @@ namespace FastOrder
 
                         activeDispatchTasks.Add(
                             dispatchTask);
+
                     }
                     else
                     {
-                        long sentSnapshot;
-                        long inFlightSnapshot;
-
-                        lock (accountingLock)
-                        {
-                            sentSnapshot =
-                                sentQuantity;
-
-                            inFlightSnapshot =
-                                inFlightQuantity;
-                        }
+                        OrderSessionAccountingSnapshot accounting =
+                            execution.GetAccountingSnapshot();
 
                         WriteImportant(
                             "CLOCK SLOT " +
@@ -2975,24 +3216,19 @@ namespace FastOrder
                             ": NO FREE QUANTITY");
                         WriteImportant(
                             "SENT: " +
-                            sentSnapshot);
+                            accounting.SentQuantity);
                         WriteImportant(
                             "IN-FLIGHT: " +
-                            inFlightSnapshot);
+                            accounting.InFlightQuantity);
 
                         UpdateSessionProgress(
                             sessionNextDueAt,
                             "حجم آزاد برای اسلات جدید وجود ندارد");
                     }
 
-                    bool allQuantityAccounted;
-
-                    lock (accountingLock)
-                    {
-                        allQuantityAccounted =
-                            sentQuantity >=
-                            totalQuantity;
-                    }
+                    bool allQuantityAccounted =
+                        execution.GetAccountingSnapshot().SentQuantity >=
+                        totalQuantity;
 
                     if (allQuantityAccounted)
                     {
@@ -3022,17 +3258,14 @@ namespace FastOrder
                     }
                 }
 
-                long finalSent;
-                long finalInFlight;
+                OrderSessionAccountingSnapshot finalAccounting =
+                    execution.GetAccountingSnapshot();
 
-                lock (accountingLock)
-                {
-                    finalSent =
-                        sentQuantity;
+                long finalSent =
+                    finalAccounting.SentQuantity;
 
-                    finalInFlight =
-                        inFlightQuantity;
-                }
+                long finalInFlight =
+                    finalAccounting.InFlightQuantity;
 
                 WriteImportant("");
                 WriteImportant(
@@ -3057,9 +3290,11 @@ namespace FastOrder
                         finalInFlight));
                 WriteImportant(
                     "CLICKED ORDER COUNT: " +
-                    clickedOrderCount);
+                    finalAccounting.ClickedOrderCount);
                 WriteImportant(
-                    "BROKER OUTCOME: VERIFY IN EASYTRADER ORDER LIST");
+                    "BROKER OUTCOME: VERIFY IN " +
+                    session.BrokerDisplayName +
+                    " ORDER LIST");
                 WriteImportant(
                     "========================================");
 
@@ -3087,7 +3322,11 @@ namespace FastOrder
 
                 SetStatus(
                     finalSent == totalQuantity
-                        ? "کل حجم از طریق کلیک رسمی ارسال شد؛ نتیجه سفارش‌ها را در EasyTrader بررسی کنید."
+                        ? "کل حجم نشست " +
+                          session.SessionIdDisplay +
+                          " از طریق کلیک رسمی ارسال شد؛ نتیجه را در " +
+                          session.BrokerDisplayName +
+                          " بررسی کنید."
                         : "بازه ارسال پایان یافت؛ بخشی از حجم ارسال نشد.");
             }
             catch (OperationCanceledException)
@@ -3116,36 +3355,49 @@ namespace FastOrder
                     }
                 }
 
-                long canceledSent;
-                long canceledInFlight;
-
-                lock (accountingLock)
-                {
-                    canceledSent =
-                        sentQuantity;
-
-                    canceledInFlight =
-                        inFlightQuantity;
-                }
+                OrderSessionAccountingSnapshot canceledAccounting =
+                    execution.GetAccountingSnapshot();
 
                 WriteImportant(
                     "CANCEL FINAL SENT QUANTITY: " +
-                    canceledSent);
+                    canceledAccounting.SentQuantity);
                 WriteImportant(
                     "CANCEL FINAL IN-FLIGHT QUANTITY: " +
-                    canceledInFlight);
+                    canceledAccounting.InFlightQuantity);
 
                 UpdateSessionProgress(
                     null,
                     "لغو شد؛ dispatchهای شروع‌شده تعیین تکلیف شدند");
 
-                session.SetState(
-                    OrderSessionState.Canceled,
-                    "توسط کاربر لغو شد");
+                string cancellationReason =
+                    string.IsNullOrWhiteSpace(
+                        execution.CancellationReason)
+                        ? "اجرای نشست متوقف شد."
+                        : execution.CancellationReason;
 
-                WriteScheduledOrderStopped(
-                    "زمان‌بندی توسط کاربر لغو شد؛ slot جدید ایجاد نشد و dispatchهای قبلاً شروع‌شده تعیین تکلیف شدند.",
-                    "CANCELED BY USER");
+                if (execution.CancellationIsFailure)
+                {
+                    session.SetState(
+                        OrderSessionState.Failed,
+                        "به علت خرابی زیرساخت متوقف شد",
+                        cancellationReason);
+
+                    WriteScheduledOrderStopped(
+                        cancellationReason +
+                        " slot جدید ایجاد نشد و dispatchهای قبلاً شروع‌شده تعیین تکلیف شدند.",
+                        "STOPPED ON INFRASTRUCTURE FAILURE");
+                }
+                else
+                {
+                    session.SetState(
+                        OrderSessionState.Canceled,
+                        "توسط کاربر لغو شد");
+
+                    WriteScheduledOrderStopped(
+                        cancellationReason +
+                        " slot جدید ایجاد نشد و dispatchهای قبلاً شروع‌شده تعیین تکلیف شدند.",
+                        "CANCELED BY USER");
+                }
             }
             catch (Exception ex)
             {
@@ -3178,24 +3430,15 @@ namespace FastOrder
                     }
                 }
 
-                long errorSent;
-                long errorInFlight;
-
-                lock (accountingLock)
-                {
-                    errorSent =
-                        sentQuantity;
-
-                    errorInFlight =
-                        inFlightQuantity;
-                }
+                OrderSessionAccountingSnapshot errorAccounting =
+                    execution.GetAccountingSnapshot();
 
                 WriteImportant(
                     "INTERNAL ERROR FINAL SENT QUANTITY: " +
-                    errorSent);
+                    errorAccounting.SentQuantity);
                 WriteImportant(
                     "INTERNAL ERROR FINAL IN-FLIGHT QUANTITY: " +
-                    errorInFlight);
+                    errorAccounting.InFlightQuantity);
 
                 UpdateSessionProgress(
                     null,
@@ -3225,39 +3468,7 @@ namespace FastOrder
                         session.SessionIdDisplay);
                 }
 
-                exchangeClockRefreshCancellation.Cancel();
-
-                try
-                {
-                    await exchangeClockRefreshTask;
-                }
-                catch (OperationCanceledException)
-                {
-                }
-
-                ResetLiveSubmissionTracking();
-
-                if (ReferenceEquals(
-                    _scheduledOrderCancellation,
-                    cancellationSource))
-                {
-                    _scheduledOrderCancellation =
-                        null;
-                }
-
-                _scheduledOrderActive =
-                    false;
-
-                if (ReferenceEquals(
-                    _activeOrderSession,
-                    session))
-                {
-                    _activeOrderSession =
-                        null;
-                }
-
-                SetScheduledOrderControls(
-                    false);
+                PulseAllSessionSchedulers();
             }
         }
 
@@ -3274,13 +3485,13 @@ namespace FastOrder
             return reading.Now;
         }
 
-        private async Task DelayUntilExchangeTimeAsync(
+        private async Task<bool> WaitUntilExchangeTimeOrWakeAsync(
             DateTimeOffset targetTime,
+            OrderSessionExecution execution,
             CancellationToken cancellationToken)
         {
-            TimeSpan maximumDelayChunk =
-                TimeSpan.FromSeconds(
-                    1);
+            TimeSpan maximumWaitChunk =
+                TimeSpan.FromSeconds(1);
 
             while (true)
             {
@@ -3293,14 +3504,20 @@ namespace FastOrder
                 if (remaining <=
                     TimeSpan.Zero)
                 {
-                    return;
+                    return false;
                 }
 
-                await Task.Delay(
-                    remaining < maximumDelayChunk
+                TimeSpan waitDuration =
+                    remaining < maximumWaitChunk
                         ? remaining
-                        : maximumDelayChunk,
-                    cancellationToken);
+                        : maximumWaitChunk;
+
+                if (await execution.WaitForWakeAsync(
+                    waitDuration,
+                    cancellationToken))
+                {
+                    return true;
+                }
             }
         }
 
@@ -3344,13 +3561,42 @@ namespace FastOrder
             }
         }
 
+        private async Task DispatchReservedSliceForExecutionAsync(
+            CoreWebView2 coreWebView,
+            OrderSessionExecution execution,
+            OrderSession session,
+            Order order,
+            int slotNumber,
+            long reservedQuantity,
+            CancellationToken cancellationToken,
+            Action<long> onClicked,
+            Action<long> onNotClicked)
+        {
+            try
+            {
+                await DispatchReservedSliceAsync(
+                    coreWebView,
+                    session,
+                    order,
+                    slotNumber,
+                    reservedQuantity,
+                    cancellationToken,
+                    onClicked,
+                    onNotClicked);
+            }
+            finally
+            {
+                execution.DispatchFinished();
+                PulseAllSessionSchedulers();
+            }
+        }
+
         private async Task DispatchReservedSliceAsync(
             CoreWebView2 coreWebView,
             OrderSession session,
             Order order,
             int slotNumber,
             long reservedQuantity,
-            object accountingLock,
             CancellationToken cancellationToken,
             Action<long> onClicked,
             Action<long> onNotClicked)
@@ -4280,6 +4526,17 @@ namespace FastOrder
             bool orderUiAvailable =
                 _selectedBroker.SupportsOfficialOrderUiAutomation;
 
+            bool orderEntryOperationAvailable =
+                orderUiAvailable &&
+                !_sessionCreationInProgress &&
+                !_liveSubmissionInProgress;
+
+            bool selectedSessionActive =
+                SessionDataGrid.SelectedItem is OrderSession selectedSession &&
+                TryGetActiveSessionExecution(
+                    selectedSession.SessionId,
+                    out _);
+
             BrokerSelectionComboBox.IsEnabled =
                 !isActive;
 
@@ -4290,12 +4547,10 @@ namespace FastOrder
                 !isActive;
 
             PreviewOrderButton.IsEnabled =
-                !isActive &&
-                orderUiAvailable;
+                orderEntryOperationAvailable;
 
             ReadOrderFormButton.IsEnabled =
-                !isActive &&
-                orderUiAvailable &&
+                orderEntryOperationAvailable &&
                 string.Equals(
                     _selectedBroker.Id,
                     BrokerProfiles.PishroKamanId,
@@ -4307,20 +4562,18 @@ namespace FastOrder
                     : PrepareOrderButton.Content;
 
             PrepareOrderButton.IsEnabled =
-                !isActive &&
-                orderUiAvailable &&
+                orderEntryOperationAvailable &&
                 _currentOrderSnapshot != null;
 
             SendLiveOrderButton.IsEnabled =
-                !isActive &&
-                orderUiAvailable &&
+                orderEntryOperationAvailable &&
                 _currentOrderSnapshot != null;
 
             ReloadButton.IsEnabled =
                 !isActive;
 
             CancelScheduledOrderButton.IsEnabled =
-                isActive;
+                selectedSessionActive;
 
             OrderUiDryRunTimingButton.IsEnabled =
                 !isActive &&
@@ -4831,9 +5084,6 @@ namespace FastOrder
             TaskCompletionSource<LiveOrderNetworkObservation>?
                 completionSource =
                     _activeLiveSubmissionCompletion;
-
-            _activeOrderSession?.SetLastHttpStatus(
-                status);
 
             // ابتدا قفل تلاش آزاد می‌شود؛ سپس completionSource محلی نتیجه را
             // به چرخه زمان‌بندی تحویل می‌دهد.
@@ -5822,35 +6072,339 @@ namespace FastOrder
             object sender,
             RoutedEventArgs e)
         {
-            CancellationTokenSource? cancellationSource =
-                _scheduledOrderCancellation;
-
-            if (!_scheduledOrderActive ||
-                cancellationSource == null)
+            if (SessionDataGrid.SelectedItem is not
+                OrderSession selectedSession)
             {
                 SetStatus(
-                    "زمان‌بندی فعالی برای لغو وجود ندارد.");
+                    "ابتدا یک نشست فعال را از جدول انتخاب کنید.");
 
                 return;
             }
 
-            CancelScheduledOrderButton.IsEnabled =
-                false;
+            RequestSessionCancellation(
+                selectedSession,
+                "لغو نشست توسط کاربر درخواست شد.");
+        }
 
-            cancellationSource.Cancel();
+        private void SessionDataGrid_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            SetScheduledOrderControls(
+                _scheduledOrderActive);
+        }
+
+        private void PauseOrderSessionButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!TryGetSessionFromActionButton(
+                sender,
+                out OrderSession? session) ||
+                session == null ||
+                !TryGetActiveSessionExecution(
+                    session.SessionId,
+                    out OrderSessionExecution? execution) ||
+                execution == null)
+            {
+                SetStatus(
+                    "این نشست دیگر فعال نیست.");
+
+                return;
+            }
+
+            if (!execution.TryPause())
+            {
+                SetStatus(
+                    "نشست در وضعیت قابل مکث نیست.");
+
+                return;
+            }
+
+            _globalNextDueQueue.RemoveSession(
+                session.SessionId);
+
+            OrderSessionAccountingSnapshot accounting =
+                execution.GetAccountingSnapshot();
+
+            session.SetState(
+                OrderSessionState.Paused,
+                "به درخواست کاربر متوقف موقت شد");
+
+            session.UpdateProgress(
+                accounting.SentQuantity,
+                accounting.InFlightQuantity,
+                accounting.ClickedOrderCount,
+                null,
+                "مکث؛ dispatchهای شروع‌شده تعیین تکلیف می‌شوند");
+
+            PulseAllSessionSchedulers();
+
+            WriteImportant(
+                "SESSION PAUSED: " +
+                session.SessionIdDisplay);
+
+            SetStatus(
+                "نشست " +
+                session.SessionIdDisplay +
+                " متوقف موقت شد؛ نشست‌های دیگر ادامه دارند.");
+        }
+
+        private void ResumeOrderSessionButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!TryGetSessionFromActionButton(
+                sender,
+                out OrderSession? session) ||
+                session == null ||
+                !TryGetActiveSessionExecution(
+                    session.SessionId,
+                    out OrderSessionExecution? execution) ||
+                execution == null)
+            {
+                SetStatus(
+                    "این نشست دیگر فعال نیست.");
+
+                return;
+            }
+
+            DateTimeOffset now;
+
+            try
+            {
+                now =
+                    GetFreshExchangeTime();
+            }
+            catch (Exception ex)
+            {
+                WriteImportant(
+                    "SESSION RESUME BLOCKED: " +
+                    ex.Message);
+
+                SetStatus(
+                    "ساعت معتبر مرکز معاملات در دسترس نیست؛ نشست در حالت مکث باقی ماند.");
+
+                return;
+            }
+
+            if (now >=
+                session.EndTime)
+            {
+                execution.MarkWindowClosed();
+                execution.Pulse();
+
+                SetStatus(
+                    "بازه این نشست پایان یافته است؛ زمان‌بند آن را بدون اسلات جدید می‌بندد.");
+
+                return;
+            }
+
+            if (!execution.TryResume())
+            {
+                SetStatus(
+                    "نشست در وضعیت قابل ادامه نیست.");
+
+                return;
+            }
+
+            DateTimeOffset nextTarget =
+                GetNextFutureSessionTarget(
+                    session.StartTime,
+                    now);
+
+            if (nextTarget >=
+                session.EndTime)
+            {
+                execution.TryPause();
+                execution.MarkWindowClosed();
+                execution.Pulse();
+
+                SetStatus(
+                    "اسلات آینده‌ای داخل بازه نشست باقی نمانده است؛ زمان‌بند آن را می‌بندد.");
+
+                return;
+            }
+
+            try
+            {
+                _globalNextDueQueue.RemoveSession(
+                    session.SessionId);
+
+                _globalNextDueQueue.Enqueue(
+                    execution.CreateNextSlice(
+                        nextTarget,
+                        DefaultScheduledSlicePriority));
+            }
+            catch (Exception ex)
+            {
+                execution.TryPause();
+
+                WriteImportant(
+                    "SESSION RESUME QUEUE ERROR: " +
+                    ex.Message);
+
+                SetStatus(
+                    "ادامه نشست به علت خطای صف انجام نشد؛ نشست در حالت مکث باقی ماند.");
+
+                return;
+            }
+
+            OrderSessionAccountingSnapshot accounting =
+                execution.GetAccountingSnapshot();
+
+            session.SetState(
+                OrderSessionState.Waiting,
+                "از اولین اسلات آینده ادامه یافت");
+
+            session.UpdateProgress(
+                accounting.SentQuantity,
+                accounting.InFlightQuantity,
+                accounting.ClickedOrderCount,
+                nextTarget,
+                "ادامه از " +
+                nextTarget.ToString(
+                    "HH:mm:ss.fff",
+                    CultureInfo.InvariantCulture));
+
+            PulseAllSessionSchedulers();
+
+            WriteImportant(
+                "SESSION RESUMED: " +
+                session.SessionIdDisplay +
+                " @ " +
+                nextTarget.ToString(
+                    "HH:mm:ss.fff",
+                    CultureInfo.InvariantCulture));
+
+            SetStatus(
+                "نشست " +
+                session.SessionIdDisplay +
+                " از اولین اسلات آینده ادامه یافت.");
+        }
+
+        private void CancelOrderSessionButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!TryGetSessionFromActionButton(
+                sender,
+                out OrderSession? session) ||
+                session == null)
+            {
+                SetStatus(
+                    "نشست انتخاب‌شده معتبر نیست.");
+
+                return;
+            }
+
+            RequestSessionCancellation(
+                session,
+                "لغو نشست توسط کاربر درخواست شد.");
+        }
+
+        private void RequestSessionCancellation(
+            OrderSession session,
+            string reason)
+        {
+            if (!TryGetActiveSessionExecution(
+                session.SessionId,
+                out OrderSessionExecution? execution) ||
+                execution == null ||
+                !execution.RequestCancel(
+                    reason))
+            {
+                SetStatus(
+                    "این نشست دیگر فعال یا قابل لغو نیست.");
+
+                return;
+            }
+
+            _globalNextDueQueue.RemoveSession(
+                session.SessionId);
+
+            OrderSessionAccountingSnapshot accounting =
+                execution.GetAccountingSnapshot();
+
+            session.UpdateProgress(
+                accounting.SentQuantity,
+                accounting.InFlightQuantity,
+                accounting.ClickedOrderCount,
+                null,
+                "لغو درخواست شد؛ dispatchهای شروع‌شده تعیین تکلیف می‌شوند");
+
+            PulseAllSessionSchedulers();
 
             WriteImportant("");
             WriteImportant(
-                "SCHEDULE CANCELLATION REQUESTED");
+                "SESSION CANCELLATION REQUESTED: " +
+                session.SessionIdDisplay);
             WriteImportant(
-                _liveSubmissionInProgress
-                    ? "CURRENT ATTEMPT: WAITING FOR DEFINITIVE RESULT"
-                    : "HTTP POST: NOT SENT BY CANCELLATION ACTION");
+                execution.ActiveDispatchCount > 0
+                    ? "CURRENT UI DISPATCH: WAITING FOR DEFINITIVE RESULT"
+                    : "NEW OFFICIAL SUBMIT CLICK: BLOCKED");
 
             SetStatus(
-                _liveSubmissionInProgress
-                    ? "لغو ثبت شد؛ پس از مشخص‌شدن نتیجه تلاش جاری، عملیات متوقف می‌شود."
-                    : "در حال لغو زمان‌بندی سفارش...");
+                "لغو نشست " +
+                session.SessionIdDisplay +
+                " ثبت شد؛ نشست‌های دیگر ادامه دارند.");
+
+            SetScheduledOrderControls(
+                _scheduledOrderActive);
+        }
+
+        private static bool TryGetSessionFromActionButton(
+            object sender,
+            out OrderSession? session)
+        {
+            session =
+                (sender as FrameworkElement)?.DataContext as OrderSession;
+
+            return session != null;
+        }
+
+        private static DateTimeOffset GetNextFutureSessionTarget(
+            DateTimeOffset startTime,
+            DateTimeOffset now)
+        {
+            if (now < startTime)
+            {
+                return startTime;
+            }
+
+            long intervalTicks =
+                ScheduledOrderRetryDelay.Ticks;
+
+            long elapsedTicks =
+                (now - startTime).Ticks;
+
+            long elapsedIntervals =
+                elapsedTicks /
+                intervalTicks;
+
+            return startTime.AddTicks(
+                checked(
+                    (elapsedIntervals + 1) *
+                    intervalTicks));
+        }
+
+        private void CancelAllActiveSessionExecutions(
+            string reason,
+            bool isFailure)
+        {
+            foreach (OrderSessionExecution execution in
+                GetActiveSessionExecutionSnapshot())
+            {
+                if (execution.RequestCancel(
+                    reason,
+                    isFailure))
+                {
+                    _globalNextDueQueue.RemoveSession(
+                        execution.Session.SessionId);
+                }
+            }
+
+            PulseAllSessionSchedulers();
         }
 
         // =====================================================
@@ -6014,20 +6568,22 @@ namespace FastOrder
         private void CoreWebView2_ProcessFailed(
             object? sender,
             CoreWebView2ProcessFailedEventArgs e)
-                {
-                    _scheduledOrderCancellation?.Cancel();
+        {
+            CancelAllActiveSessionExecutions(
+                "پردازش WebView2 از کار افتاد؛ مسیر رسمی کارگزاری دیگر قابل اتکا نیست.",
+                isFailure: true);
 
-                    WriteImportant(
-                        "WebView2 Process Failed:");
+            WriteImportant(
+                "WebView2 Process Failed:");
 
-                    WriteImportant(
-                        "Kind: " +
-                        e.ProcessFailedKind.ToString());
+            WriteImportant(
+                "Kind: " +
+                e.ProcessFailedKind.ToString());
 
-                    WriteImportant(
-                        "Reason: " +
-                        e.Reason.ToString());
-                }
+            WriteImportant(
+                "Reason: " +
+                e.Reason.ToString());
+        }
 
         // =====================================================
         // STATUS
@@ -6363,7 +6919,9 @@ namespace FastOrder
 
                 _applicationCancellation.Cancel();
 
-                _scheduledOrderCancellation?.Cancel();
+                CancelAllActiveSessionExecutions(
+                    "برنامه در حال بسته‌شدن است.",
+                    isFailure: false);
 
                 _officialUiDispatcher.StateChanged -=
                     OfficialUiDispatcher_StateChanged;
