@@ -26,7 +26,7 @@ commit that contains the implementation.
 | 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
 | 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
 | 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
-| 78.2 — Pishro Kaman official UI adapter | In progress — adapter and 10/10 Dry-Run validated; single-session scheduler-entry fix built, runtime confirmation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625`, `d81c0007b531e8545e3938eb73819602760f1931`, `1b31c7d8039e5c6d50bf22299b71dbe8d57b417b` |
+| 78.2 — Pishro Kaman official UI adapter | Completed | 2026-09-02 | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625`, `d81c0007b531e8545e3938eb73819602760f1931`, `1b31c7d8039e5c6d50bf22299b71dbe8d57b417b` |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
@@ -435,9 +435,9 @@ commit that contains the implementation.
 
 ## Stage 78.2 — Pishro Kaman official UI adapter
 
-**Status:** In progress; strict adapter, logged-in Kaman form discovery, symbol identity, local
-payload validation, and 10/10 prepare-only Dry-Run validated on 2026-09-02. The single-session
-scheduler-entry compatibility fix is built; one user-controlled runtime confirmation remains.
+**Status:** Completed on 2026-09-02. Strict adapter, logged-in Kaman form discovery, symbol
+identity, local payload validation, 10/10 prepare-only Dry-Run, single-session scheduler entry,
+official submit flow, and broker-order-list registration were validated.
 
 **Implementation commit:** `8753f08b81ebb389404fae9fd81092dc46c9d6aa`
 (`Enable Pishro order workflow controls`)
@@ -534,7 +534,8 @@ scheduler-entry compatibility fix is built; one user-controlled runtime confirma
   unchanged.
 - Pishro multi-symbol switching is not guessed; if the unique official BUY action does not expose
   the confirmed symbol name, the operation stops.
-- No live order was sent during this implementation or verification.
+- No live order was sent by automated build/static verification. The final submission acceptance
+  run was initiated and confirmed by the user through the controlled official-UI workflow.
 
 ### Verification
 
@@ -586,18 +587,18 @@ scheduler-entry compatibility fix is built; one user-controlled runtime confirma
 - No live order was submitted while verifying the scheduler-entry source fix.
 - `git diff --check` passed before the implementation commit.
 
-### Remaining controlled runtime validation before completion
+### Completion runtime evidence
 
-- Close the older Debug process and start the newly built application so the eight
-  `LIVE FLOW TRACE` checkpoints are present at runtime.
-- Repeat the already validated Kaman Read/Confirm flow, choose a future TSETMC-based start/end
-  window, and approve the live confirmation only when a real submission is explicitly intended.
-- Confirm that the trace reaches `SESSION CREATED` and `ENTERING SCHEDULER`. Stop and inspect on any
-  earlier trace; never automatically retry after an official submit click.
-- Treat `CLICKED` only as the local single-click boundary and verify the broker outcome separately
-  in Kaman's official order list.
-- Do not start Stage 79 concurrent-session work until this single-session scheduler entry is
-  confirmed in the updated runtime.
+- In the final user-controlled run, all intended scheduled orders were sent through Kaman's
+  official visible UI and appeared in the official Kaman broker order list.
+- This broker-order-list evidence confirms registration/acceptance of the submitted orders and
+  closes the single-session scheduler-entry blocker. It is not recorded as proof of exchange fill
+  or trade execution.
+- The successful outcome confirms that control progressed beyond final confirmation, session
+  construction, and scheduler entry to the broker-specific official submit path.
+- The invariant remains unchanged: once an attempt reports `CLICKED`, FastOrder does not
+  automatically retry it; the official broker order list remains the outcome authority.
+- Stage 79 was not started as part of this validation.
 
 ## Template for future stages
 

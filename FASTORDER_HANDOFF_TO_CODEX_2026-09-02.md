@@ -761,3 +761,10 @@ The actual local source was inspected after this handoff was written.
 - No live order was submitted during this verification. The older running Debug executable must be
   replaced with the new build, and one user-controlled runtime confirmation must reach
   `SESSION CREATED` and `ENTERING SCHEDULER` before Stage 79 begins.
+
+## Final user-controlled runtime outcome
+
+The user subsequently confirmed that all intended scheduled orders were sent and were registered
+in Kaman's official broker order list. This closes the single-session scheduler-entry blocker and
+completes Stage 78.2. The evidence is recorded as broker registration/acceptance, not as proof that
+the exchange filled or executed the orders. Stage 79 concurrency remains not started.
