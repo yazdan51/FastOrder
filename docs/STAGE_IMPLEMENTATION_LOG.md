@@ -27,7 +27,9 @@ commit that contains the implementation.
 | 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
 | 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
 | 78.2 — Pishro Kaman official UI adapter | Completed | 2026-09-02 | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625`, `d81c0007b531e8545e3938eb73819602760f1931`, `1b31c7d8039e5c6d50bf22299b71dbe8d57b417b` |
-| 79 — Enable concurrent active sessions | Not started | — | — |
+| 79 — Enable concurrent active sessions | Completed | 2026-09-02 | `0e99b2efaab46e18ccb069e40e7bf2a715a9449e` |
+| 79.1 — Dual broker workspaces/tabs | Not started | — | — |
+| 79.2 — Cross-broker scheduling coordinator | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
 
@@ -599,6 +601,82 @@ official submit flow, and broker-order-list registration were validated.
 - The invariant remains unchanged: once an attempt reports `CLICKED`, FastOrder does not
   automatically retry it; the official broker order list remains the outcome authority.
 - Stage 79 was not started as part of this validation.
+
+## Stage 79 — Enable concurrent active sessions
+
+**Status:** Completed on 2026-09-02
+
+**Commit:** `0e99b2efaab46e18ccb069e40e7bf2a715a9449e` (`Enable concurrent active order sessions`)
+
+### Delivered changes
+
+- Added `OrderSessionExecution`, which owns each active session's cancellation, pause state,
+  one-second slot sequence, future-slice sequence, active-dispatch count, and lock-protected
+  `sent`/`in-flight`/clicked accounting.
+- Replaced the single active-session scheduler handle with a registry of independent active
+  executions. Adding a confirmed order now starts that session asynchronously and immediately
+  returns Current Order Setup to a state where another order for the same selected broker can be
+  read, confirmed, and scheduled.
+- Made each session coordinator wait until its own slice is the deterministic head of the shared
+  global next-due queue. A session no longer fails merely because another session owns the earlier
+  slice.
+- Kept all official broker-form access serialized through the existing single
+  `OfficialOrderUiDispatcher`; concurrent sessions never manipulate the shared WebView DOM at the
+  same time.
+- Made initial pre-warm session-specific. It prepares only that session's immutable confirmed
+  snapshot and can no longer accidentally prepare the order belonging to another queue head.
+- Added a single shared three-second exchange-clock refresh loop for all active sessions instead
+  of creating one TSETMC synchronization loop per session.
+- Added row-level `مکث`, `ادامه`, and `لغو` actions plus a selected-session cancel action. Pause
+  removes only that session's future slice, resume uses the first future cadence target without
+  replaying missed slots, and cancel leaves unrelated sessions running.
+- Preserved settlement of official-UI dispatches that had already started before pause,
+  cancellation, window expiry, or an internal error; their reservation must still resolve to
+  either `sent` or released `in-flight` quantity.
+- Added shared-infrastructure shutdown behavior: a WebView2 process failure requests fail-closed
+  cancellation for every active session, while an ordinary user cancellation remains local to
+  the selected session.
+- Kept broker selection, navigation, login, compatibility probing, and reload locked while any
+  session is active. This stage enables several sessions only for the one currently selected
+  broker and one official WebView.
+
+### Changed files
+
+- `OrderSessionExecution.cs` (new)
+- `MainWindow.xaml`
+- `MainWindow.xaml.cs`
+
+### Preserved behavior and non-goals
+
+- The selected broker's official visible UI remains the only final submission path. No direct
+  broker order API `POST` was added.
+- No token, cookie, authorization value, request body, password, OTP, CAPTCHA, or browser-storage
+  value is read or stored.
+- Immediate broker-specific symbol/instrument, price, quantity, and nonce verification remains
+  mandatory before each official final click; ambiguity remains fail-closed.
+- A slice is committed to `sent` only after `CLICKED`; it is never automatically retried after
+  that official submit click. Broker registration or fill is not inferred from the click alone.
+- TSETMC exchange-clock freshness, the one-second cadence, missed-slot no-burst behavior, global
+  next-due ordering, and Prime Until Ready remain authoritative.
+- The invariant `sent + in-flight <= total` is enforced independently for every session.
+- Stage 79 does not keep EasyTrader and Pishro open simultaneously. Dual broker WebViews/tabs are
+  explicitly deferred to Stage 79.1, and cross-broker scheduling coordination to Stage 79.2.
+- Stage 80 contention warnings and Stage 81 event-history/logging polish remain deferred.
+
+### Verification
+
+- Debug and Release builds passed in isolated output directories with zero errors and zero
+  warnings; the user's normal build output was not overwritten.
+- A temporary in-memory two-session execution probe passed independent reserve/commit/release
+  accounting, the over-send guard, pause/resume/cancel isolation, deterministic queue tie-breaking,
+  and removal of one session without affecting the other. Test-only files and build artifacts were
+  removed afterward.
+- `git diff --check` passed before the implementation commit.
+- A focused added-line safety scan found no new `fetch`, `XMLHttpRequest`, direct order endpoint,
+  credential/storage access, authorization value, or `HttpMethod.Post`/`PostAsync` path.
+- No WebView submit test and no live order were executed during Stage 79 implementation. Runtime
+  acceptance must use deliberately non-overlapping, user-confirmed test orders and verify each
+  result in the selected broker's official order list.
 
 ## Template for future stages
 

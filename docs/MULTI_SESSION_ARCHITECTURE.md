@@ -828,9 +828,34 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
 
 ### Stage 79 — Enable concurrent active sessions
 
-- several waiting/running sessions;
-- independent pause/resume/cancel;
-- shared dispatcher only during UI operation.
+- **Implemented on 2026-09-02** in
+  `0e99b2efaab46e18ccb069e40e7bf2a715a9449e`;
+- several waiting/running sessions for the currently selected broker;
+- one independent execution state and sent/in-flight ledger per session;
+- independent pause/resume/cancel, with already-started dispatches settled before final cleanup;
+- one deterministic global next-due queue and one shared official UI dispatcher;
+- one shared fast TSETMC clock-refresh loop while at least one session is active;
+- Current Order Setup may prepare another session while existing sessions remain active;
+- broker switching and navigation remain locked while any session is active.
+
+### Stage 79.1 — Dual broker workspaces/tabs
+
+- add one isolated WebView2 workspace per broker so EasyTrader and Pishro can remain signed in and
+  visible at the same time;
+- keep each broker profile bound to its own exact trusted origins, adapter, dispatcher, navigation,
+  and non-sensitive readiness evidence;
+- let the user explicitly choose the target broker when creating Current Order Setup;
+- preserve existing same-broker Stage 79 behavior inside each workspace;
+- do not share DOM state, nonce state, authentication evidence, or selectors across brokers.
+
+### Stage 79.2 — Cross-broker scheduling coordinator
+
+- allow active sessions from both broker workspaces at the same time;
+- retain one independent dispatcher per broker WebView while coordinating target times globally;
+- isolate a broker-local WebView/origin failure to that broker unless a truly shared dependency,
+  such as the exchange clock, fails;
+- expose broker identity in queue, status, cancellation, and outcome verification;
+- preserve one-click/no-auto-retry and per-session sent/in-flight accounting across brokers.
 
 ### Stage 80 — Conflict detection
 
