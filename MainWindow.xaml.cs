@@ -131,6 +131,13 @@ namespace FastOrder
         {
             InitializeComponent();
 
+            if (App.HasExplicitInstance)
+            {
+                Title =
+                    "FastOrder - Instance " +
+                    App.InstanceId;
+            }
+
             _selectedBroker =
                 BrokerProfiles.ResolveOrDefault(
                     Properties.Settings.Default.SelectedBrokerId);
