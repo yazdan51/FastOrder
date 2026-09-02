@@ -62,9 +62,9 @@ No direct credentials, tokens, cookies, authorization values, or custom direct o
 The user selects the broker before login and order preparation. The supported broker profiles are:
 
 - EasyTrader: `https://d.easytrader.ir/`;
-- Pishro primary route: the official Hamrah Plus UI at `https://mobile.pishrobroker.ir/`;
-- Pishro secondary trusted origin: the Kaman referral/landing route at
-  `https://kaman.pishrobroker.ir/trading-view/IRO9MSMI0D81`.
+- Pishro primary route: the official Kaman UI at `https://kaman.pishrobroker.ir/`;
+- Pishro secondary trusted origin: the official Hamrah Plus UI at
+  `https://mobile.pishrobroker.ir/`.
 
 The selection is persisted between application launches and is always visible in the header and
 session list. Changing the selected broker:
@@ -110,11 +110,11 @@ cookies, storage, request bodies, or headers, and it must not click or submit. S
 separate strict Pishro adapter and progressive control activation. The Pishro profile uses an
 explicit exact allowlist containing only `https://kaman.pishrobroker.ir` and
 `https://mobile.pishrobroker.ir`; wildcards, sibling subdomains, and lookalike origins remain
-rejected. The adapter accepts only an origin in that list, one unambiguous active ISIN discovered
-from the full URL, the visible order form, or explicit active-selection metadata, one unambiguous
-visible price/quantity pair, and one unambiguous official buy action. It remains fail-closed on any
-DOM ambiguity, and logged-in order-form validation is required before Stage 78.2 is marked
-complete. No private endpoint is guessed.
+rejected. The adapter accepts only an origin in that list, one unambiguous visible BUY form, one
+unambiguous visible price/quantity pair, and one unambiguous official buy action. Kaman instrument
+identity is verified from the visible symbol name on that official BUY action; ISIN is optional for
+Kaman and is validated when present. EasyTrader remains ISIN-dependent. The adapter remains
+fail-closed on any DOM or instrument ambiguity. No private endpoint is guessed.
 
 ---
 
@@ -357,7 +357,7 @@ Before every final submit, verify:
 
 ```text
 Expected Symbol
-Expected ISIN
+Expected ISIN when required or exposed by the selected broker
 Expected Price
 Expected Quantity
 ```
@@ -727,9 +727,11 @@ Non-negotiable:
 1. No direct broker API credentials are read or stored.
 2. No direct custom order POST is introduced.
 3. Final submission uses the selected broker's official UI adapter. EasyTrader retains its
-   validated adapter; Pishro uses its separate strict adapter and fails closed unless every
-   required visible control, active-instrument ISIN, value, and preparation nonce is unambiguous.
-4. Symbol, ISIN, price, and quantity are revalidated immediately before every final click.
+   validated ISIN-dependent adapter; Pishro uses its separate strict adapter and fails closed
+   unless every required visible control, active symbol name, value, and preparation nonce is
+   unambiguous. A Pishro ISIN is validated when the official UI exposes one but is not fabricated.
+4. Symbol identity, broker-required ISIN, price, and quantity are revalidated immediately before
+   every final click.
 5. Each session has independent sent/in-flight accounting.
 6. No session exceeds its configured total quantity.
 7. A `CLICKED` slice is never automatically retried.
@@ -814,8 +816,8 @@ in [`STAGE_IMPLEMENTATION_LOG.md`](STAGE_IMPLEMENTATION_LOG.md).
   probe without weakening origin validation or reading field values;
 - allow only the exact Pishro Kaman and official Hamrah Plus HTTPS origins and monitor only their two
   exact hosts; do not accept arbitrary Pishro subdomains;
-- navigate the selected Pishro profile directly to Hamrah Plus instead of requiring an extra click
-  through Kaman's promotional landing page;
+- navigate the selected Pishro profile to the official Kaman root while retaining Hamrah Plus as
+  the only additional exact trusted origin;
 - implement separate Pishro open/read/prepare/verify/click scripts;
 - keep Open and Read enabled after Pishro selection, while Prepare and Add to Schedule remain
   disabled until a successful read and explicit local confirmation;

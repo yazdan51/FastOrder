@@ -26,7 +26,7 @@ commit that contains the implementation.
 | 77 — Central Official UI Dispatcher | Completed | 2026-09-01 | `71c4a0874c91afe507dd5ea507681f75a983841c` |
 | 78 — Global next-due priority queue | Completed | 2026-09-01 | `4cfc0975ce9e210f80dda5c44e9adbdeb3504768` |
 | 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
-| 78.2 — Pishro Kaman official UI adapter | In progress — mobile origin verified; logged-in form validation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625`, `d81c0007b531e8545e3938eb73819602760f1931` |
+| 78.2 — Pishro Kaman official UI adapter | In progress — adapter and 10/10 Dry-Run validated; single-session scheduler-entry fix built, runtime confirmation pending | — | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625`, `d81c0007b531e8545e3938eb73819602760f1931`, `1b31c7d8039e5c6d50bf22299b71dbe8d57b417b` |
 | 79 — Enable concurrent active sessions | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
 | 81 — UX polish | Not started | — | — |
@@ -435,8 +435,9 @@ commit that contains the implementation.
 
 ## Stage 78.2 — Pishro Kaman official UI adapter
 
-**Status:** In progress; control lifecycle and strict adapter implemented on 2026-09-01, exact
-Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validation pending
+**Status:** In progress; strict adapter, logged-in Kaman form discovery, symbol identity, local
+payload validation, and 10/10 prepare-only Dry-Run validated on 2026-09-02. The single-session
+scheduler-entry compatibility fix is built; one user-controlled runtime confirmation remains.
 
 **Implementation commit:** `8753f08b81ebb389404fae9fd81092dc46c9d6aa`
 (`Enable Pishro order workflow controls`)
@@ -453,6 +454,9 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
 **Direct-Hamrah-Plus commit:** `d81c0007b531e8545e3938eb73819602760f1931`
 (`Open Pishro directly in Hamrah Plus`)
 
+**Kaman validation and scheduler-handoff commit:** `1b31c7d8039e5c6d50bf22299b71dbe8d57b417b`
+(`Complete Kaman single-session scheduler handoff`)
+
 ### Delivered changes
 
 - Removed the permanent Pishro capability gate that disabled every order-workflow control.
@@ -468,16 +472,17 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
   accidental reuse of EasyTrader scripts for Pishro.
 - Added a separate Pishro Kaman adapter for open/read/ensure/prepare/submit/atomic-submit/clear
   operations through the official visible UI.
-- Required Pishro's exact HTTPS origin, one unambiguous active ISIN, an unambiguous visible price
-  input, quantity input, commission, total value, and buy action before the workflow can advance.
-- Expanded active-instrument discovery after runtime evidence showed that Pishro removes the ISIN
-  from `pathname` after navigation: the adapter now checks the full URL, attributes and short
-  visible text in the located order form, and explicit active/selected element metadata in that
-  priority order.
-- Added a distinct `INSTRUMENT_AMBIGUOUS` stop result when a selected source exposes more than one
-  ISIN; the adapter never chooses the first candidate silently.
+- Required Pishro's exact HTTPS origin, one unambiguous visible BUY action, and the unique visible
+  price and quantity inputs inside that BUY scope before the workflow can advance.
+- Corrected BUY/SELL coexistence handling after logged-in runtime evidence showed that Kaman uses
+  duplicate `price-input` and `count-input` identifiers in separate scopes. The adapter now finds
+  the unique official BUY action first and resolves inputs only inside its owning container.
+- Verified Kaman instrument identity from the symbol name carried by the visible official BUY
+  action. Empty ISIN is allowed only for Kaman; a supplied ISIN remains subject to validation, and
+  EasyTrader remains ISIN-dependent.
 - Bound Pishro preparation and final submission through the existing per-attempt nonce and
-  revalidated active ISIN, price, quantity, and action immediately before a single official click.
+  revalidated active symbol name, price, quantity, and action immediately before a single official
+  click.
 - Used a successful read of the visible form on the exact trusted Pishro origin as non-sensitive
   broker-access evidence; no credential value is inspected.
 - Generalized user-facing official-UI error messages to identify the selected broker rather than
@@ -491,9 +496,18 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
 - Applied the same exact origin list to the sanitized compatibility probe and the separate Pishro
   order UI adapter, and monitored the two corresponding exact hosts without broadening the
   EasyTrader route.
-- Made the official Hamrah Plus root the Pishro profile's primary navigation target. The Kaman
-  origin remains an exact secondary trusted origin, but FastOrder no longer starts on its
-  promotional `Enter new version` landing page.
+- Set the official Kaman root as the Pishro profile's primary navigation target after runtime
+  validation, while retaining Hamrah Plus as the only additional exact trusted origin.
+- Made broker-form commission and total value optional for Kaman, calculated the local gross value
+  from price and quantity, and retained the existing EasyTrader commission/total requirements.
+- Made `OrderSession` use the same broker-aware identity rule as payload validation. This removes
+  the post-confirmation exception that previously rejected every Kaman order with an intentionally
+  empty ISIN before scheduler entry.
+- Added non-sensitive `LIVE FLOW TRACE` checkpoints around the confirmation dialog, exchange-clock
+  revalidation, session construction, and scheduler entry/return so this controlled transition is
+  visible without reading credentials or request contents.
+- Made the final confirmation content scrollable and resizable while keeping its action buttons
+  fixed, so scheduling fields remain available under Windows display scaling.
 
 ### Changed files
 
@@ -502,6 +516,9 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
 - `BrokerCompatibilityProbe.cs`
 - `BrokerProfile.cs`
 - `MainWindow.xaml.cs`
+- `LiveOrderConfirmationWindow.xaml`
+- `OrderSession.cs`
+- `OrderSubmissionValidator.cs`
 - `OfficialOrderUiBridge.cs`
 
 ### Preserved behavior and non-goals
@@ -515,8 +532,8 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
 - TSETMC exchange-clock scheduling, one-second slots, missed-slot no-burst behavior, Prime Until
   Ready, the global next-due queue, the central dispatcher, and sent/in-flight accounting remain
   unchanged.
-- Pishro multi-symbol switching is not guessed; if exactly one active ISIN cannot be proven or it
-  differs from the confirmed snapshot, the operation stops.
+- Pishro multi-symbol switching is not guessed; if the unique official BUY action does not expose
+  the confirmed symbol name, the operation stops.
 - No live order was sent during this implementation or verification.
 
 ### Verification
@@ -553,22 +570,34 @@ Kaman/Hamrah Plus origins verified on 2026-09-02, logged-in order-form validatio
   only sanitized structure for the three visible login inputs. It explicitly reported field values
   as not read, credential/header/body data as not read, final submit click as `NO`, and
   `HTTP POST: NOT SENT`.
-- A rebuilt Release launch navigated directly to `https://mobile.pishrobroker.ir/` and then followed
-  the site's own invalid-session flow through `/Logout` to `/Login`; it did not navigate through
-  the Kaman landing page. This confirmed the new direct entry route while leaving authentication
-  entirely manual.
+- An earlier rebuilt Release launch navigated directly to `https://mobile.pishrobroker.ir/` and
+  then followed the site's own invalid-session flow through `/Logout` to `/Login`; authentication
+  remained entirely manual. That historical check was later superseded by the validated correction
+  that restored the official Kaman root as the primary route.
+- A logged-in Kaman runtime read captured symbol `جوانه کوچک`, price `30291`, and quantity `500`
+  from the official BUY form while intentionally leaving ISIN, commission, and broker-form total
+  empty. Broker-aware payload validation passed and reported `HTTP POST: NOT SENT`.
+- The Kaman prepare-only Dry-Run completed all 10 one-second probes with `STATUS: PREPARED`,
+  `FINAL SUBMIT CLICK: NO`, `ORDER POST CREATED BY DRY-RUN: NO`, and no direct credential access.
+- Debug and Release builds of the scheduler-entry fix passed with zero errors and zero warnings in
+  isolated output directories, without stopping the user's older running Debug process.
+- A focused constructor regression probe confirmed that Kaman sessions accept empty ISIN,
+  EasyTrader sessions still reject empty ISIN, and unknown broker identities fail closed.
+- No live order was submitted while verifying the scheduler-entry source fix.
 - `git diff --check` passed before the implementation commit.
 
-### Required runtime validation before completion
+### Remaining controlled runtime validation before completion
 
-- Complete and retain manual sign-in through the official Pishro page in the running Release
-  instance; authentication is never automated by FastOrder validation.
-- Confirm that the WebView has left the pre-login/mobile-version landing content before attempting
-  to open or read an order form.
-- Open one official buy form and enter a non-sensitive test price and quantity.
-- Run Read and Confirm, then a prepare-only Dry-Run; do not approve a live order for validation.
-- Record the sanitized status codes and confirm the exact DOM contract or tighten the adapter as
-  needed.
+- Close the older Debug process and start the newly built application so the eight
+  `LIVE FLOW TRACE` checkpoints are present at runtime.
+- Repeat the already validated Kaman Read/Confirm flow, choose a future TSETMC-based start/end
+  window, and approve the live confirmation only when a real submission is explicitly intended.
+- Confirm that the trace reaches `SESSION CREATED` and `ENTERING SCHEDULER`. Stop and inspect on any
+  earlier trace; never automatically retry after an official submit click.
+- Treat `CLICKED` only as the local single-click boundary and verify the broker outcome separately
+  in Kaman's official order list.
+- Do not start Stage 79 concurrent-session work until this single-session scheduler entry is
+  confirmed in the updated runtime.
 
 ## Template for future stages
 
