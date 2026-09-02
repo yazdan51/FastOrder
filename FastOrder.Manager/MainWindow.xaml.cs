@@ -1,14 +1,19 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
-using System.Windows.Controls;
 
 namespace FastOrder.Manager
 {
     public partial class MainWindow : Window
     {
-        private readonly IReadOnlyDictionary<string, ManagedFastOrderProcess>
-            _instances;
+        private readonly ObservableCollection<ManagedInstanceRow>
+            _instances =
+                new ObservableCollection<ManagedInstanceRow>();
+
+        private long _nextInstanceId =
+            1;
 
         private bool _shutdownStarted;
         private bool _shutdownCompleted;
@@ -17,45 +22,38 @@ namespace FastOrder.Manager
         {
             InitializeComponent();
 
-            ManagedFastOrderProcess instance1 =
-                new ManagedFastOrderProcess(
-                    "1");
+            InstanceGrid.ItemsSource =
+                _instances;
 
-            ManagedFastOrderProcess instance2 =
-                new ManagedFastOrderProcess(
-                    "2");
+            AddNextInstance();
+            AddNextInstance();
+        }
 
-            _instances =
-                new Dictionary<string, ManagedFastOrderProcess>(
-                    StringComparer.Ordinal)
-                {
-                    [instance1.InstanceId] =
-                        instance1,
-
-                    [instance2.InstanceId] =
-                        instance2
-                };
-
-            foreach (ManagedFastOrderProcess instance in
-                _instances.Values)
+        private void NewInstanceButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            try
             {
-                instance.StateChanged +=
-                    Instance_StateChanged;
+                AddNextInstance();
             }
-
-            RefreshAllRows();
+            catch (OverflowException ex)
+            {
+                ShowError(
+                    ex);
+            }
         }
 
         private async void StartInstanceButton_Click(
             object sender,
             RoutedEventArgs e)
         {
-            ManagedFastOrderProcess instance =
-                GetInstanceForButton(
+            ManagedInstanceRow row =
+                GetRowForButton(
                     sender);
 
             await RunUiOperationAsync(
-                () => instance.StartAsync(
+                () => row.Process.StartAsync(
                     ResolveFastOrderExecutablePath()));
         }
 
@@ -63,24 +61,24 @@ namespace FastOrder.Manager
             object sender,
             RoutedEventArgs e)
         {
-            ManagedFastOrderProcess instance =
-                GetInstanceForButton(
+            ManagedInstanceRow row =
+                GetRowForButton(
                     sender);
 
             await RunUiOperationAsync(
-                instance.StopAsync);
+                row.Process.StopAsync);
         }
 
         private async void RestartInstanceButton_Click(
             object sender,
             RoutedEventArgs e)
         {
-            ManagedFastOrderProcess instance =
-                GetInstanceForButton(
+            ManagedInstanceRow row =
+                GetRowForButton(
                     sender);
 
             await RunUiOperationAsync(
-                () => instance.RestartAsync(
+                () => row.Process.RestartAsync(
                     ResolveFastOrderExecutablePath()));
         }
 
@@ -95,9 +93,9 @@ namespace FastOrder.Manager
                         ResolveFastOrderExecutablePath();
 
                     await Task.WhenAll(
-                        _instances.Values.Select(
-                            instance =>
-                                instance.StartAsync(
+                        _instances.Select(
+                            row =>
+                                row.Process.StartAsync(
                                     executablePath)));
                 });
         }
@@ -137,13 +135,13 @@ namespace FastOrder.Manager
             {
                 await StopAllAsync();
 
-                foreach (ManagedFastOrderProcess instance in
-                    _instances.Values)
+                foreach (ManagedInstanceRow row in
+                    _instances)
                 {
-                    instance.StateChanged -=
+                    row.Process.StateChanged -=
                         Instance_StateChanged;
 
-                    instance.Dispose();
+                    row.Process.Dispose();
                 }
 
                 _shutdownCompleted =
@@ -162,6 +160,32 @@ namespace FastOrder.Manager
                 ShowError(
                     ex);
             }
+        }
+
+        private void AddNextInstance()
+        {
+            long instanceNumber =
+                _nextInstanceId;
+
+            _nextInstanceId =
+                checked(
+                    instanceNumber +
+                    1);
+
+            ManagedFastOrderProcess process =
+                new ManagedFastOrderProcess(
+                    instanceNumber.ToString(
+                        CultureInfo.InvariantCulture));
+
+            ManagedInstanceRow row =
+                new ManagedInstanceRow(
+                    process);
+
+            process.StateChanged +=
+                Instance_StateChanged;
+
+            _instances.Add(
+                row);
         }
 
         private async Task RunUiOperationAsync(
@@ -194,91 +218,60 @@ namespace FastOrder.Manager
         private Task StopAllAsync()
         {
             return Task.WhenAll(
-                _instances.Values.Select(
-                    instance =>
-                        instance.StopAsync()));
+                _instances.Select(
+                    row =>
+                        row.Process.StopAsync()));
         }
 
-        private ManagedFastOrderProcess GetInstanceForButton(
+        private ManagedInstanceRow GetRowForButton(
             object sender)
         {
-            string? instanceId =
-                (sender as FrameworkElement)?.Tag as string;
-
-            if (instanceId == null ||
-                !_instances.TryGetValue(
-                    instanceId,
-                    out ManagedFastOrderProcess? instance))
+            if ((sender as FrameworkElement)?.DataContext is not
+                ManagedInstanceRow row ||
+                !_instances.Contains(
+                    row))
             {
                 throw new InvalidOperationException(
                     "The managed FastOrder instance could not be identified.");
             }
 
-            return instance;
+            return row;
         }
 
         private void Instance_StateChanged(
             object? sender,
             EventArgs e)
         {
+            void RefreshChangedRow()
+            {
+                ManagedInstanceRow? row =
+                    _instances.FirstOrDefault(
+                        item =>
+                            ReferenceEquals(
+                                item.Process,
+                                sender));
+
+                row?.Refresh();
+            }
+
             if (Dispatcher.CheckAccess())
             {
-                RefreshAllRows();
+                RefreshChangedRow();
 
                 return;
             }
 
             _ = Dispatcher.BeginInvoke(
-                RefreshAllRows);
+                RefreshChangedRow);
         }
 
         private void RefreshAllRows()
         {
-            RefreshRow(
-                _instances["1"],
-                Instance1StatusText,
-                Instance1PidText,
-                Instance1StartButton,
-                Instance1StopButton,
-                Instance1RestartButton);
-
-            RefreshRow(
-                _instances["2"],
-                Instance2StatusText,
-                Instance2PidText,
-                Instance2StartButton,
-                Instance2StopButton,
-                Instance2RestartButton);
-        }
-
-        private static void RefreshRow(
-            ManagedFastOrderProcess instance,
-            TextBlock statusText,
-            TextBlock processIdText,
-            Button startButton,
-            Button stopButton,
-            Button restartButton)
-        {
-            ManagedProcessState state =
-                instance.GetState();
-
-            statusText.Text =
-                state.IsRunning
-                    ? "Running"
-                    : "Stopped";
-
-            processIdText.Text =
-                state.ProcessId?.ToString() ??
-                "—";
-
-            startButton.IsEnabled =
-                !state.IsRunning;
-
-            stopButton.IsEnabled =
-                state.IsRunning;
-
-            restartButton.IsEnabled =
-                state.IsRunning;
+            foreach (ManagedInstanceRow row in
+                _instances)
+            {
+                row.Refresh();
+            }
         }
 
         private static string ResolveFastOrderExecutablePath()
@@ -341,6 +334,97 @@ namespace FastOrder.Manager
                 "FastOrder Manager",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+        }
+
+        private sealed class ManagedInstanceRow :
+            INotifyPropertyChanged
+        {
+            private bool _isRunning;
+            private string _processId =
+                "—";
+
+            public ManagedInstanceRow(
+                ManagedFastOrderProcess process)
+            {
+                Process =
+                    process;
+
+                Refresh();
+            }
+
+            public event PropertyChangedEventHandler? PropertyChanged;
+
+            public ManagedFastOrderProcess Process { get; }
+
+            public string InstanceId =>
+                Process.InstanceId;
+
+            public string Status =>
+                _isRunning
+                    ? "Running"
+                    : "Stopped";
+
+            public string ProcessId =>
+                _processId;
+
+            public bool CanStart =>
+                !_isRunning;
+
+            public bool CanStop =>
+                _isRunning;
+
+            public bool CanRestart =>
+                _isRunning;
+
+            public void Refresh()
+            {
+                ManagedProcessState state =
+                    Process.GetState();
+
+                string processId =
+                    state.ProcessId?.ToString(
+                        CultureInfo.InvariantCulture) ??
+                    "—";
+
+                if (_isRunning == state.IsRunning &&
+                    string.Equals(
+                        _processId,
+                        processId,
+                        StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _isRunning =
+                    state.IsRunning;
+
+                _processId =
+                    processId;
+
+                RaisePropertyChanged(
+                    nameof(Status));
+
+                RaisePropertyChanged(
+                    nameof(ProcessId));
+
+                RaisePropertyChanged(
+                    nameof(CanStart));
+
+                RaisePropertyChanged(
+                    nameof(CanStop));
+
+                RaisePropertyChanged(
+                    nameof(CanRestart));
+            }
+
+            private void RaisePropertyChanged(
+                string propertyName)
+            {
+                PropertyChanged?.Invoke(
+                    this,
+                    new PropertyChangedEventArgs(
+                        propertyName));
+            }
         }
     }
 }
