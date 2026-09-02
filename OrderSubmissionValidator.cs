@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -69,6 +69,15 @@ namespace FastOrder
         public static OrderSubmissionValidationResult Validate(
             CreateOrderPayload? payload)
         {
+            return ValidateForBroker(
+                payload,
+                BrokerProfiles.EasyTraderId);
+        }
+
+        public static OrderSubmissionValidationResult ValidateForBroker(
+            CreateOrderPayload? payload,
+            string brokerId)
+        {
             if (payload == null)
             {
                 return OrderSubmissionValidationResult.Invalid(
@@ -91,7 +100,27 @@ namespace FastOrder
                     "نام نماد معتبر نیست.");
             }
 
-            if (string.IsNullOrWhiteSpace(order.SymbolIsin) ||
+            bool pishroKaman =
+                string.Equals(
+                    brokerId,
+                    BrokerProfiles.PishroKamanId,
+                    StringComparison.Ordinal);
+
+            if (!pishroKaman &&
+                (string.IsNullOrWhiteSpace(order.SymbolIsin) ||
+                 !Regex.IsMatch(
+                    order.SymbolIsin,
+                    "^[A-Z0-9]{12}$",
+                    RegexOptions.CultureInvariant |
+                    RegexOptions.NonBacktracking,
+                    TimeSpan.FromMilliseconds(100))))
+            {
+                return OrderSubmissionValidationResult.Invalid(
+                    "ISIN معتبر نیست.");
+            }
+
+            if (pishroKaman &&
+                !string.IsNullOrWhiteSpace(order.SymbolIsin) &&
                 !Regex.IsMatch(
                     order.SymbolIsin,
                     "^[A-Z0-9]{12}$",
@@ -100,7 +129,7 @@ namespace FastOrder
                     TimeSpan.FromMilliseconds(100)))
             {
                 return OrderSubmissionValidationResult.Invalid(
-                    "ISIN معتبر نیست.");
+                    "ISIN خوانده‌شده معتبر نیست.");
             }
 
             if (order.Price <= 0)
@@ -130,11 +159,13 @@ namespace FastOrder
             }
 
             if (!double.IsFinite(order.Commission) ||
-                order.Commission <= 0 ||
+                (!pishroKaman && order.Commission <= 0) ||
                 order.Commission >= 0.1)
             {
                 return OrderSubmissionValidationResult.Invalid(
-                    "نرخ کارمزد خوانده‌شده از فرم EasyTrader معتبر نیست.");
+                    pishroKaman
+                        ? "نرخ کارمزد سفارش پیشرو معتبر نیست."
+                        : "نرخ کارمزد خوانده‌شده از فرم EasyTrader معتبر نیست.");
             }
 
             if (!DateTime.TryParseExact(

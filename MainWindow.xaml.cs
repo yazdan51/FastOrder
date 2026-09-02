@@ -910,8 +910,15 @@ namespace FastOrder
                 _currentOrderSnapshot = ConfirmedOrderSnapshot.Create(
                     _selectedBroker.Id,
                     payloadJson);
+
                 PrepareOrderButton.IsEnabled = true;
                 PrepareOrderButton.Content = "آماده‌سازی محلی";
+
+                OrderUiDryRunTimingButton.IsEnabled =
+                    _selectedBroker.SupportsOfficialOrderUiAutomation &&
+                    !_scheduledOrderActive &&
+                    !_liveSubmissionInProgress &&
+                    _currentOrderSnapshot != null;
 
                 UpdateCurrentOrderSetup(
                     payload.Order);
@@ -948,7 +955,7 @@ namespace FastOrder
             }
         }
 
-        private static bool TryBuildPayloadFromOfficialForm(
+        private bool TryBuildPayloadFromOfficialForm(
             OfficialOrderFormReadResult form,
             out CreateOrderPayload? payload,
             out OrderCalculationResult? calculation,
@@ -966,9 +973,26 @@ namespace FastOrder
                 return false;
             }
 
-            if (isin.Length != 12 || !isin.StartsWith("IR", StringComparison.Ordinal))
+            bool pishroKaman =
+                string.Equals(
+                    _selectedBroker.Id,
+                    BrokerProfiles.PishroKamanId,
+                    StringComparison.Ordinal);
+
+            if (!pishroKaman &&
+                (isin.Length != 12 ||
+                 !isin.StartsWith("IR", StringComparison.Ordinal)))
             {
                 error = "ISIN معتبر قابل تشخیص نبود.";
+                return false;
+            }
+
+            if (pishroKaman &&
+                !string.IsNullOrWhiteSpace(isin) &&
+                (isin.Length != 12 ||
+                 !isin.StartsWith("IR", StringComparison.Ordinal)))
+            {
+                error = "ISIN خوانده‌شده معتبر نیست.";
                 return false;
             }
 
@@ -996,22 +1020,28 @@ namespace FastOrder
                 return false;
             }
 
-            if (!long.TryParse(form.CommissionAmount,
-                System.Globalization.NumberStyles.None,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out long commissionAmount) || commissionAmount <= 0)
-            {
-                error = "کارمزد معتبر از فرم رسمی کارگزاری خوانده نشد.";
-                return false;
-            }
+            long commissionAmount = 0;
+            long totalValueFromForm = 0;
 
-            if (!long.TryParse(form.TotalValue,
-                System.Globalization.NumberStyles.None,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out long totalValueFromForm) || totalValueFromForm <= 0)
+            if (!pishroKaman)
             {
-                error = "قیمت کل معتبر از فرم رسمی کارگزاری خوانده نشد.";
-                return false;
+                if (!long.TryParse(form.CommissionAmount,
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out commissionAmount) || commissionAmount <= 0)
+                {
+                    error = "کارمزد معتبر از فرم رسمی کارگزاری خوانده نشد.";
+                    return false;
+                }
+
+                if (!long.TryParse(form.TotalValue,
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out totalValueFromForm) || totalValueFromForm <= 0)
+                {
+                    error = "قیمت کل معتبر از فرم رسمی کارگزاری خوانده نشد.";
+                    return false;
+                }
             }
 
             try
@@ -1026,10 +1056,19 @@ namespace FastOrder
                 }
 
                 double commissionRate =
-                    (double)commissionAmount / gross.GrossValue;
+                    pishroKaman
+                        ? 0d
+                        : (double)commissionAmount / gross.GrossValue;
 
                 calculation =
-                    OrderCalculator.Calculate(price, quantity, commissionAmount);
+                    pishroKaman
+                        ? gross
+                        : OrderCalculator.Calculate(price, quantity, commissionAmount);
+
+                if (pishroKaman)
+                {
+                    totalValueFromForm = gross.GrossValue;
+                }
 
                 payload = new CreateOrderPayload
                 {
@@ -1865,8 +1904,9 @@ namespace FastOrder
             }
 
             OrderSubmissionValidationResult validation =
-                OrderSubmissionValidator.Validate(
-                    payload);
+                OrderSubmissionValidator.ValidateForBroker(
+                    payload,
+                    _selectedBroker.Id);
 
             if (!validation.IsValid)
             {
@@ -2098,9 +2138,18 @@ namespace FastOrder
                         Owner = this
                     };
 
+                WriteImportant(
+                    "LIVE FLOW TRACE: CONFIRMATION WINDOW OPENING");
+
                 bool confirmed =
                     confirmationWindow.ShowDialog() ==
                     true;
+
+                WriteImportant(
+                    "LIVE FLOW TRACE: CONFIRMATION WINDOW CLOSED; RESULT=" +
+                    (confirmed
+                        ? "TRUE"
+                        : "FALSE"));
 
                 if (!confirmed)
                 {
@@ -2127,6 +2176,9 @@ namespace FastOrder
                     return;
                 }
 
+                SetStatus(
+                    "تأیید نهایی ثبت شد؛ در حال بازاعتبارسنجی ساعت مرکز معاملات...");
+
                 // پس از بسته‌شدن پنجره تأیید، Snapshot دوباره تطبیق داده می‌شود
                 // تا تغییر هم‌زمان سفارش نتواند وارد مسیر ارسال شود.
                 if (!ReferenceEquals(
@@ -2141,6 +2193,9 @@ namespace FastOrder
 
                     return;
                 }
+
+                WriteImportant(
+                    "LIVE FLOW TRACE: EXCHANGE CLOCK REVALIDATION STARTED");
 
                 try
                 {
@@ -2163,6 +2218,9 @@ namespace FastOrder
 
                     return;
                 }
+
+                WriteImportant(
+                    "LIVE FLOW TRACE: EXCHANGE CLOCK REVALIDATION COMPLETED");
 
                 DateTimeOffset scheduledStartAt =
                     confirmationWindow.ScheduledStartAt;
@@ -2193,6 +2251,21 @@ namespace FastOrder
                     checked(
                         ++_nextOrderSessionSequence);
 
+                WriteImportant(
+                    "LIVE FLOW TRACE: CREATING SESSION; BROKER=" +
+                    _selectedBroker.Id +
+                    "; START=" +
+                    scheduledStartAt.ToString(
+                        "yyyy-MM-dd HH:mm:ss.fff zzz",
+                        CultureInfo.InvariantCulture) +
+                    "; END=" +
+                    scheduledEndAt.ToString(
+                        "yyyy-MM-dd HH:mm:ss.fff zzz",
+                        CultureInfo.InvariantCulture) +
+                    "; MAX_QTY=" +
+                    confirmationWindow.MaxQuantityPerOrder.ToString(
+                        CultureInfo.InvariantCulture));
+
                 createdSession =
                     new OrderSession(
                         creationSequence,
@@ -2201,6 +2274,10 @@ namespace FastOrder
                         scheduledStartAt,
                         scheduledEndAt,
                         snapshot);
+
+                WriteImportant(
+                    "LIVE FLOW TRACE: SESSION CREATED; ID=" +
+                    createdSession.SessionIdDisplay);
 
                 createdSession.SetState(
                     OrderSessionState.Waiting,
@@ -2223,11 +2300,20 @@ namespace FastOrder
 
                 // از این نقطه به بعد، چرخه زمان‌بندی فقط از Snapshot خود نشست
                 // استفاده می‌کند و به وضعیت قابل‌تغییر فرم جاری وابسته نیست.
+                SetStatus(
+                    "نشست ایجاد شد؛ در حال ورود به زمان‌بند تک‌جلسه‌ای...");
+
+                WriteImportant(
+                    "LIVE FLOW TRACE: ENTERING SCHEDULER");
+
                 await RunScheduledOrderAsync(
                     coreWebView,
                     createdSession);
+
+                WriteImportant(
+                    "LIVE FLOW TRACE: SCHEDULER RETURNED");
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 createdSession?.SetState(
                     OrderSessionState.Failed,
@@ -2236,8 +2322,22 @@ namespace FastOrder
 
                 ResetLiveSubmissionTracking();
 
+                WriteImportant("");
+                WriteImportant("========================================");
+                WriteImportant("LIVE ORDER INTERNAL ERROR");
+                WriteImportant("========================================");
+                WriteImportant("EXCEPTION TYPE: " + ex.GetType().FullName);
+                WriteImportant("EXCEPTION MESSAGE: " + ex.Message);
+                WriteImportant("INNER EXCEPTION: " +
+                    (ex.InnerException?.Message ?? "NONE"));
+                WriteImportant("STACK TRACE: " +
+                    (ex.StackTrace ?? "NOT AVAILABLE"));
+                WriteImportant("FINAL SUBMIT CLICK: NO");
+                WriteImportant("HTTP POST: NOT SENT");
+                WriteImportant("========================================");
+
                 WriteLiveSubmissionBlocked(
-                    "خطای داخلی در مسیر کنترل‌شده رخ داد.");
+                    "خطای داخلی در مسیر کنترل‌شده رخ داد؛ جزئیات فنی در Important Log ثبت شد.");
 
                 if (_currentOrderSnapshot != null)
                 {
@@ -4460,6 +4560,7 @@ namespace FastOrder
             if (!TryGetValidatedSnapshotOrder(
                 snapshot,
                 requireFreshConfirmation: true,
+                _selectedBroker.Id,
                 out payload,
                 out errorMessage))
             {
@@ -4499,6 +4600,7 @@ namespace FastOrder
             if (!TryGetValidatedSnapshotOrder(
                 snapshot,
                 requireFreshConfirmation: false,
+                session.BrokerId,
                 out payload,
                 out errorMessage) ||
                 payload?.Order == null)
@@ -4551,6 +4653,7 @@ namespace FastOrder
         private static bool TryGetValidatedSnapshotOrder(
             ConfirmedOrderSnapshot? snapshot,
             bool requireFreshConfirmation,
+            string brokerId,
             out CreateOrderPayload? payload,
             out string errorMessage)
         {
@@ -4606,8 +4709,9 @@ namespace FastOrder
             }
 
             OrderSubmissionValidationResult validation =
-                OrderSubmissionValidator.Validate(
-                    payload);
+                OrderSubmissionValidator.ValidateForBroker(
+                    payload,
+                    brokerId);
 
             if (!validation.IsValid)
             {
@@ -6281,4 +6385,3 @@ namespace FastOrder
         }
     }
 }
-

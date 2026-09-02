@@ -34,10 +34,33 @@ namespace FastOrder
                     nameof(creationSequence));
             }
 
+            string brokerId =
+                confirmedOrderSnapshot.BrokerId;
+
+            bool pishroKaman =
+                string.Equals(
+                    brokerId,
+                    BrokerProfiles.PishroKamanId,
+                    StringComparison.Ordinal);
+
+            if (!pishroKaman &&
+                !string.Equals(
+                    brokerId,
+                    BrokerProfiles.EasyTraderId,
+                    StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "Session broker identity is not supported.",
+                    nameof(confirmedOrderSnapshot));
+            }
+
+            // Kaman's validated official BUY flow identifies the instrument by
+            // the visible symbol name. EasyTrader still requires its ISIN.
             if (string.IsNullOrWhiteSpace(
                 order.SymbolName) ||
-                string.IsNullOrWhiteSpace(
-                    order.SymbolIsin))
+                (!pishroKaman &&
+                 string.IsNullOrWhiteSpace(
+                     order.SymbolIsin)))
             {
                 throw new ArgumentException(
                     "Session instrument identity cannot be empty.",
@@ -106,7 +129,7 @@ namespace FastOrder
                 confirmedOrderSnapshot.CreateIndependentCopy();
 
             BrokerId =
-                ConfirmedOrderSnapshot.BrokerId;
+                brokerId;
 
             BrokerDisplayName =
                 BrokerProfiles.GetDisplayName(

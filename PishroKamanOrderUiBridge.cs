@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.Text.Json;
 
@@ -213,12 +213,6 @@ namespace FastOrder
                     };
                     const findBuyAction = scope => {
                         if (!(scope instanceof Element)) return null;
-                        const exactLabels = [
-                            "ارسال خرید",
-                            "ثبت خرید",
-                            "ثبت سفارش خرید",
-                            "ارسال سفارش خرید"
-                        ];
                         const actions = Array.from(
                             scope.querySelectorAll("button,[role=button],input[type=submit]"))
                             .filter(visible)
@@ -227,11 +221,16 @@ namespace FastOrder
                                     action.textContent ||
                                     action.getAttribute("value") ||
                                     action.getAttribute("aria-label"));
-                                if (exactLabels.includes(text)) return true;
-                                if (text !== "خرید") return false;
-                                return action instanceof HTMLButtonElement &&
-                                    String(action.type).toLowerCase() === "submit" &&
-                                    action.getAttribute("role") !== "tab";
+                                const classTokens = String(
+                                    action.getAttribute("class") || "")
+                                    .split(/\s+/)
+                                    .filter(Boolean);
+
+                                // Runtime-validated Kaman contract:
+                                // official buy action has class token "buy" and a visible
+                                // label beginning with "خرید" (for example "خرید جوانه کوچک").
+                                return classTokens.includes("buy") &&
+                                    /^خرید(?:\s|$)/.test(text);
                             });
                         return actions.length === 1 ? actions[0] : null;
                     };
@@ -244,16 +243,65 @@ namespace FastOrder
                         return tabs.length === 1 ? tabs[0] : null;
                     };
                     const locateForm = () => {
-                        const priceInput = chooseInput("price");
-                        const quantityInput = chooseInput("quantity");
-                        if (!(priceInput instanceof HTMLInputElement) ||
-                            !(quantityInput instanceof HTMLInputElement) ||
-                            priceInput === quantityInput) return null;
-                        const scope = commonScope(priceInput, quantityInput);
-                        const buyAction = findBuyAction(scope);
-                        if (!(scope instanceof HTMLElement) ||
-                            !(buyAction instanceof HTMLElement)) return null;
-                        return { scope, priceInput, quantityInput, buyAction };
+                        // Kaman renders BUY and SELL forms at the same time and reuses
+                        // price-input / count-input IDs. Therefore the inputs must be
+                        // resolved inside the scope of the unique visible BUY action,
+                        // never globally.
+                        const allBuyActions = Array.from(
+                            document.querySelectorAll(
+                                "button,[role=button],input[type=submit]"))
+                            .filter(visible)
+                            .filter(action => {
+                                const text = norm(
+                                    action.textContent ||
+                                    action.getAttribute("value") ||
+                                    action.getAttribute("aria-label"));
+                                const classTokens = String(
+                                    action.getAttribute("class") || "")
+                                    .split(/\s+/)
+                                    .filter(Boolean);
+                                return classTokens.includes("buy") &&
+                                    /^خرید(?:\s|$)/.test(text);
+                            });
+
+                        if (allBuyActions.length !== 1)
+                            return null;
+
+                        const buyAction = allBuyActions[0];
+                        let scope = buyAction.parentElement;
+
+                        for (let depth = 0;
+                             depth < 16 && scope instanceof HTMLElement;
+                             depth += 1, scope = scope.parentElement) {
+                            if (!visible(scope)) continue;
+
+                            const priceInputs = Array.from(
+                                scope.querySelectorAll('input#price-input'))
+                                .filter(input =>
+                                    input instanceof HTMLInputElement &&
+                                    visible(input));
+
+                            const quantityInputs = Array.from(
+                                scope.querySelectorAll('input#count-input'))
+                                .filter(input =>
+                                    input instanceof HTMLInputElement &&
+                                    visible(input));
+
+                            if (priceInputs.length === 1 &&
+                                quantityInputs.length === 1) {
+                                return {
+                                    scope,
+                                    priceInput: priceInputs[0],
+                                    quantityInput: quantityInputs[0],
+                                    buyAction
+                                };
+                            }
+
+                            if (scope === document.body)
+                                break;
+                        }
+
+                        return null;
                     };
                     const extractIsins = value => Array.from(new Set(
                         String(value ?? "")
@@ -314,6 +362,26 @@ namespace FastOrder
                             return { candidates: selectedIsins, source: "active-selection" };
 
                         return { candidates: [], source: "none" };
+                    };
+                    const buySymbolName = form => {
+                        if (!form || !(form.buyAction instanceof HTMLElement))
+                            return "";
+                        const text = norm(
+                            form.buyAction.textContent ||
+                            form.buyAction.getAttribute("value") ||
+                            form.buyAction.getAttribute("aria-label"));
+                        return norm(text.replace(/^خرید(?:\s+|$)/, ""));
+                    };
+                    const verifyBuySymbolName = form => {
+                        const currentSymbolName = buySymbolName(form);
+                        if (!currentSymbolName)
+                            return result("INSTRUMENT_NOT_VERIFIED",
+                                "Visible Pishro buy action did not expose a symbol name.");
+                        if (expectedSymbolName &&
+                            norm(currentSymbolName) !== norm(expectedSymbolName))
+                            return result("INSTRUMENT_NOT_VERIFIED",
+                                "Visible Pishro buy symbol name did not match the confirmed order.");
+                        return null;
                     };
                     const pageSymbolName = isin => {
                         const selectors = [
@@ -390,8 +458,7 @@ namespace FastOrder
                         if (!form)
                             return result("ORDER_DIALOG_NOT_FOUND",
                                 "One unambiguous visible Pishro buy form was not found.");
-                        const discovery = discoverActiveInstrument(form.scope);
-                        const instrumentError = verifyInstrument(discovery);
+                        const instrumentError = verifyBuySymbolName(form);
                         if (instrumentError) return instrumentError;
                         if (form.buyAction instanceof HTMLButtonElement &&
                             (form.buyAction.disabled ||
@@ -426,8 +493,7 @@ namespace FastOrder
                         if (!form)
                             return result("ORDER_DIALOG_NOT_FOUND",
                                 "One unambiguous visible Pishro buy form was not found.");
-                        const discovery = discoverActiveInstrument(form.scope);
-                        const instrumentError = verifyInstrument(discovery);
+                        const instrumentError = verifyBuySymbolName(form);
                         if (instrumentError) return instrumentError;
                         if (num(form.quantityInput.value) !== expectedQuantity ||
                             num(form.priceInput.value) !== expectedPrice)
@@ -458,8 +524,10 @@ namespace FastOrder
                     if (mode === "open" || mode === "ensure") {
                         const form = locateForm();
                         if (mode === "ensure") {
-                            const discovery = discoverActiveInstrument(form?.scope);
-                            const instrumentError = verifyInstrument(discovery);
+                            if (!form)
+                                return result("ORDER_DIALOG_NOT_FOUND",
+                                    "One unambiguous visible Pishro buy form was not found.");
+                            const instrumentError = verifyBuySymbolName(form);
                             if (instrumentError) return instrumentError;
                         }
                         if (form)
@@ -480,34 +548,46 @@ namespace FastOrder
                         if (!form)
                             return result("ORDER_DIALOG_NOT_FOUND",
                                 "One unambiguous visible Pishro buy form was not found.");
-                        const discovery = discoverActiveInstrument(form.scope);
-                        const instrumentError = verifyInstrument(discovery);
+                        const instrumentError = verifyBuySymbolName(form);
                         if (instrumentError) return instrumentError;
-                        const currentIsin = discovery.candidates[0];
-                        const price = num(form.priceInput.value);
-                        const quantity = num(form.quantityInput.value);
+                        const currentSymbolName = buySymbolName(form);
+                        const readInputNumber = input => {
+                            if (!(input instanceof HTMLInputElement)) return "";
+                            const candidates = [
+                                input.value,
+                                input.getAttribute("value"),
+                                input.getAttribute("data-value"),
+                                input.getAttribute("aria-valuenow")
+                            ];
+                            for (const candidate of candidates) {
+                                const normalized = num(candidate);
+                                if (normalized) return normalized;
+                            }
+                            return "";
+                        };
+                        const price = readInputNumber(form.priceInput);
+                        const quantity = readInputNumber(form.quantityInput);
                         if (!price || !quantity)
-                            return result("ORDER_VALUES_NOT_READY",
-                                "Enter price and quantity in the visible Pishro form.");
-                        const commissionAmount = labeledNumber(
-                            form.scope,
-                            ["کارمزد", "مبلغ کارمزد"]);
-                        const totalValue = labeledNumber(
-                            form.scope,
-                            ["ارزش سفارش", "مبلغ سفارش", "مبلغ نهایی", "خالص پرداختی"]);
-                        if (!commissionAmount || !totalValue)
-                            return result("ORDER_TOTALS_NOT_FOUND",
-                                "Pishro commission and total value were not both visible.");
+                            return result(
+                                "ORDER_VALUES_NOT_READY",
+                                "Visible Pishro buy form was found, but price and/or quantity was empty.",
+                                currentSymbolName,
+                                "",
+                                price,
+                                quantity,
+                                0,
+                                "",
+                                "");
                         return result(
                             "FORM_READ",
                             "Visible official Pishro buy form was read.",
-                            pageSymbolName(currentIsin),
-                            currentIsin,
+                            currentSymbolName,
+                            "",
                             price,
                             quantity,
                             0,
-                            commissionAmount,
-                            totalValue);
+                            "",
+                            "");
                     }
 
                     if (mode === "prepare") return prepare();
