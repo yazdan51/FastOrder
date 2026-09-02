@@ -990,16 +990,10 @@ namespace FastOrder
                     BrokerProfiles.PishroKamanId,
                     StringComparison.Ordinal);
 
-            if (!pishroKaman &&
-                (isin.Length != 12 ||
-                 !isin.StartsWith("IR", StringComparison.Ordinal)))
-            {
-                error = "ISIN معتبر قابل تشخیص نبود.";
-                return false;
-            }
-
-            if (pishroKaman &&
-                !string.IsNullOrWhiteSpace(isin) &&
+            // SymbolName is the authoritative instrument identity for both
+            // brokers. ISIN is optional; if the official UI exposes one, keep
+            // validating its basic format as non-authoritative metadata.
+            if (!string.IsNullOrWhiteSpace(isin) &&
                 (isin.Length != 12 ||
                  !isin.StartsWith("IR", StringComparison.Ordinal)))
             {
@@ -1239,9 +1233,48 @@ namespace FastOrder
                 SetStatus(
                     "در حال آماده‌سازی WebView2...");
 
+                string? webViewProfilePath =
+                    null;
+
+                if (App.HasExplicitInstance)
+                {
+                    webViewProfilePath =
+                        System.IO.Path.Combine(
+                            System.Environment.GetFolderPath(
+                                System.Environment.SpecialFolder.LocalApplicationData),
+                            "FastOrder",
+                            "WebView2",
+                            "Instance-" +
+                            App.InstanceId);
+
+                    WriteLog(
+                        "MULTI-INSTANCE MODE: ENABLED");
+
+                    WriteLog(
+                        "INSTANCE ID: " +
+                        App.InstanceId);
+
+                    WriteLog(
+                        "WEBVIEW2 PROFILE: " +
+                        webViewProfilePath);
+                }
+
                 if (Browser.CoreWebView2 == null)
                 {
-                    await Browser.EnsureCoreWebView2Async();
+                    if (App.HasExplicitInstance)
+                    {
+                        CoreWebView2Environment environment =
+                            await CoreWebView2Environment.CreateAsync(
+                                userDataFolder:
+                                    webViewProfilePath);
+
+                        await Browser.EnsureCoreWebView2Async(
+                            environment);
+                    }
+                    else
+                    {
+                        await Browser.EnsureCoreWebView2Async();
+                    }
 
                     WriteLog(
                         "CoreWebView2 آماده شد.");
@@ -3533,12 +3566,12 @@ namespace FastOrder
                         cancellationToken);
 
                     ExchangeClockReading reading =
-                        await _exchangeClock.SynchronizeAsync(
+                        await _exchangeClock.ValidateAsync(
                             1,
                             cancellationToken);
 
                     WriteImportant(
-                        "EXCHANGE CLOCK REFRESH: " +
+                        "EXCHANGE CLOCK VALIDATED: " +
                         reading.Now.ToString(
                             "HH:mm:ss.fff",
                             CultureInfo.InvariantCulture) +
@@ -3555,7 +3588,7 @@ namespace FastOrder
                 catch (Exception ex)
                 {
                     WriteImportant(
-                        "EXCHANGE CLOCK REFRESH FAILED: " +
+                        "EXCHANGE CLOCK VALIDATION FAILED: " +
                         ex.Message);
                 }
             }

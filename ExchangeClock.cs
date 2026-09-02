@@ -50,6 +50,7 @@ namespace FastOrder
         private bool _hasReading;
         private DateTimeOffset _anchorUtc;
         private long _anchorTimestamp;
+        private long _lastSuccessfulValidationTimestamp;
         private TimeSpan _roundTripTime;
         private TimeSpan _estimatedUncertainty;
 
@@ -163,6 +164,9 @@ namespace FastOrder
                     _anchorTimestamp =
                         selectedSample.ReceiptTimestamp;
 
+                    _lastSuccessfulValidationTimestamp =
+                        selectedSample.ReceiptTimestamp;
+
                     _roundTripTime =
                         selectedSample.RoundTripTime;
 
@@ -189,6 +193,135 @@ namespace FastOrder
             }
         }
 
+        public async Task<ExchangeClockReading> ValidateAsync(
+            int sampleCount,
+            CancellationToken cancellationToken = default)
+        {
+            if (sampleCount is < 1 or > 5)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(sampleCount));
+            }
+
+            await _synchronizationLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                lock (_stateLock)
+                {
+                    if (!_hasReading)
+                    {
+                        throw new InvalidOperationException(
+                            "The TSETMC exchange clock has not been synchronized.");
+                    }
+                }
+
+                ExchangeClockSample? bestSample =
+                    null;
+
+                Exception? lastError =
+                    null;
+
+                for (int index = 0;
+                    index < sampleCount;
+                    index++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        ExchangeClockSample sample =
+                            await RequestSampleAsync(
+                                cancellationToken);
+
+                        if (bestSample == null ||
+                            sample.RoundTripTime <
+                            bestSample.Value.RoundTripTime)
+                        {
+                            bestSample =
+                                sample;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastError =
+                            ex;
+                    }
+                }
+
+                if (bestSample == null)
+                {
+                    throw new InvalidOperationException(
+                        "No valid TSETMC exchange-clock validation sample was received.",
+                        lastError);
+                }
+
+                ExchangeClockSample selectedSample =
+                    bestSample.Value;
+
+                if (Stopwatch.GetElapsedTime(
+                    selectedSample.ReceiptTimestamp) >
+                    SchedulerMaximumSampleAge)
+                {
+                    throw new InvalidOperationException(
+                        "The newest valid TSETMC exchange-clock validation sample is already stale.");
+                }
+
+                lock (_stateLock)
+                {
+                    TimeSpan elapsedFromAnchor =
+                        Stopwatch.GetElapsedTime(
+                            _anchorTimestamp,
+                            selectedSample.ReceiptTimestamp);
+
+                    DateTimeOffset extrapolatedUtcAtReceipt =
+                        _anchorUtc +
+                        elapsedFromAnchor;
+
+                    TimeSpan difference =
+                        (extrapolatedUtcAtReceipt -
+                         selectedSample.EstimatedUtcAtReceipt).Duration();
+
+                    TimeSpan allowedDifference =
+                        _estimatedUncertainty +
+                        selectedSample.EstimatedUncertainty;
+
+                    if (difference >
+                        allowedDifference)
+                    {
+                        throw new InvalidOperationException(
+                            "The TSETMC validation sample did not agree with the active exchange-clock anchor.");
+                    }
+
+                    _lastSuccessfulValidationTimestamp =
+                        selectedSample.ReceiptTimestamp;
+                }
+
+                if (!TryGetReading(
+                    TimeSpan.MaxValue,
+                    out ExchangeClockReading reading))
+                {
+                    throw new InvalidOperationException(
+                        "The validated TSETMC clock could not be read.");
+                }
+
+                return new ExchangeClockReading(
+                    reading.Now,
+                    reading.SampleAge,
+                    selectedSample.RoundTripTime,
+                    selectedSample.EstimatedUncertainty);
+            }
+            finally
+            {
+                _synchronizationLock.Release();
+            }
+        }
+
         public bool TryGetReading(
             TimeSpan maximumSampleAge,
             out ExchangeClockReading reading)
@@ -202,6 +335,7 @@ namespace FastOrder
 
             DateTimeOffset anchorUtc;
             long anchorTimestamp;
+            long lastSuccessfulValidationTimestamp;
             TimeSpan roundTripTime;
             TimeSpan estimatedUncertainty;
 
@@ -221,6 +355,9 @@ namespace FastOrder
                 anchorTimestamp =
                     _anchorTimestamp;
 
+                lastSuccessfulValidationTimestamp =
+                    _lastSuccessfulValidationTimestamp;
+
                 roundTripTime =
                     _roundTripTime;
 
@@ -228,13 +365,17 @@ namespace FastOrder
                     _estimatedUncertainty;
             }
 
-            TimeSpan sampleAge =
+            TimeSpan elapsedFromAnchor =
                 Stopwatch.GetElapsedTime(
                     anchorTimestamp);
 
+            TimeSpan sampleAge =
+                Stopwatch.GetElapsedTime(
+                    lastSuccessfulValidationTimestamp);
+
             DateTimeOffset currentUtc =
                 anchorUtc +
-                sampleAge;
+                elapsedFromAnchor;
 
             DateTimeOffset currentTehranTime =
                 TimeZoneInfo.ConvertTime(
