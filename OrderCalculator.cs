@@ -39,77 +39,10 @@ namespace FastOrder
     }
 
 
-    public class CreateOrderPayload
-    {
-        [JsonPropertyName("order")]
-        public Order Order { get; set; } = new();
-    }
+   
+
+   
 
 
-    public class OrderCalculationResult
-    {
-        public long GrossValue { get; set; }
-
-        public long CommissionAmount { get; set; }
-
-        public long TotalValue { get; set; }
-
-        public double CommissionRate { get; set; }
-    }
-
-
-    public static class OrderCalculator
-    {
-        public static OrderCalculationResult Calculate(
-            long price,
-            long quantity,
-            long commissionAmount)
-        {
-            if (price <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(price),
-                    "Price must be greater than zero.");
-            }
-
-            if (quantity <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(quantity),
-                    "Quantity must be greater than zero.");
-            }
-
-            if (commissionAmount < 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(commissionAmount),
-                    "Commission amount cannot be negative.");
-            }
-
-            long grossValue =
-                checked(price * quantity);
-
-            long totalValue =
-                checked(grossValue + commissionAmount);
-
-            double commissionRate =
-                grossValue == 0
-                    ? 0
-                    : (double)commissionAmount / grossValue;
-
-            return new OrderCalculationResult
-            {
-                GrossValue = grossValue,
-
-                CommissionAmount =
-                    commissionAmount,
-
-                TotalValue =
-                    totalValue,
-
-                CommissionRate =
-                    commissionRate
-            };
-        }
-    }
+    
 }

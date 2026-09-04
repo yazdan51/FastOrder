@@ -2853,41 +2853,7 @@ namespace FastOrder
         //        long totalValue =
         //            grossValue + commissionAmount;
 
-        //        // -------------------------------------------------
-        //        // Create Payload
-        //        // -------------------------------------------------
-
-        //        CreateOrderPayload payload =
-        //            new CreateOrderPayload
-        //            {
-        //                Order = new Order
-        //                {
-        //                    Commission = commissionRate,
-
-        //                    CreateDateTime =
-        //                        DateTime.Now.ToString(
-        //                            "M/d/yyyy, h:mm:ss tt"),
-
-        //                    OrderFrom = 34,
-
-        //                    OrderModelType = 0,
-
-        //                    Price = price,
-
-        //                    Quantity = quantity,
-
-        //                    Side = side,
-
-        //                    SymbolIsin = symbolIsin,
-
-        //                    SymbolName = "",
-
-        //                    TotalValue = totalValue,
-
-        //                    ValidityType = 0
-        //                }
-        //            };
-
+        
         //        // -------------------------------------------------
         //        // Log
         //        // -------------------------------------------------
