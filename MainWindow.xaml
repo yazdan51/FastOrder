@@ -340,34 +340,6 @@
                                 ToolTip="فرم رسمی خرید نماد جاری EasyTrader را باز می‌کند؛ ارسال انجام نمی‌شود."
                                 Click="PreviewOrderButton_Click"/>
 
-                        <Button x:Name="ReadOrderFormButton"
-                                Content="خواندن و تأیید فرم"
-                                Visibility="Collapsed"
-                                Style="{StaticResource ControlButtonStyle}"
-                                IsEnabled="False"
-                                ToolTip="نماد، ISIN، قیمت و تعداد را از فرم رسمی می‌خواند؛ ارسال انجام نمی‌شود."
-                                Click="ReadOrderFormButton_Click"/>
-
-                        <Button x:Name="PrepareOrderButton"
-                                Content="آماده‌سازی محلی"
-                                Visibility="Collapsed"
-                                Style="{StaticResource ControlButtonStyle}"
-                                IsEnabled="False"
-                                ToolTip="Payload و ترافیک طبیعی سایت را کنترل می‌کند؛ هیچ سفارشی ارسال نمی‌شود."
-                                Click="PrepareOrderButton_Click"/>
-
-                        <Button x:Name="SendLiveOrderButton"
-                                Content="افزودن به زمان‌بندی"
-                                Visibility="Collapsed"
-                                Style="{StaticResource ControlButtonStyle}"
-                                IsEnabled="False"
-                                Background="#FFC62828"
-                                BorderBrush="#FFB71C1C"
-                                Foreground="White"
-                                FontWeight="SemiBold"
-                                ToolTip="پس از تأیید نهایی، در بازه تعیین‌شده تا اولین پاسخ موفق تلاش می‌کند."
-                                Click="SendLiveOrderButton_Click"/>
-
                         <Separator Margin="0,7,0,10"/>
 
                         <TextBlock Text="ارسال زمان‌بندی‌شده"
