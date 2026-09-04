@@ -28,6 +28,7 @@ commit that contains the implementation.
 | 78.1 — User-selected broker route foundation | Completed | 2026-09-01 | `0bb94d8a3a3218333f2e60cdd1f94ff326730440` |
 | 78.2 — Pishro Kaman official UI adapter | Completed | 2026-09-02 | `8753f08b81ebb389404fae9fd81092dc46c9d6aa`, `9b800fa11ce2fbb7b1e55f0d58f63c95511a1655`, `2d68e7eb472c738d37b08d80edc763354ea07625`, `d81c0007b531e8545e3938eb73819602760f1931`, `1b31c7d8039e5c6d50bf22299b71dbe8d57b417b` |
 | 79 — Enable concurrent active sessions | Completed | 2026-09-02 | `0e99b2efaab46e18ccb069e40e7bf2a715a9449e` |
+| 79A — Click-only BUY/SELL scheduling | Completed | 2026-09-05 | `5461a01fc7c494cef26dcead361ae935851765d0`, `69a88f3ed2c186d950270fd7f61ea33976afbe07`, `107934da8a7c4ee0a958c09b8d26f3441a98a707` |
 | 79.1 — Dual broker workspaces/tabs | Not started | — | — |
 | 79.2 — Cross-broker scheduling coordinator | Not started | — | — |
 | 80 — Conflict detection | Not started | — | — |
@@ -677,6 +678,89 @@ official submit flow, and broker-order-list registration were validated.
 - No WebView submit test and no live order were executed during Stage 79 implementation. Runtime
   acceptance must use deliberately non-overlapping, user-confirmed test orders and verify each
   result in the selected broker's official order list.
+
+## Stage 79A — Click-only BUY/SELL scheduling
+
+**Status:** Completed on 2026-09-05. The side-specific DOM contracts and build are validated;
+an actual Pishro BUY/SELL submission remains a separate user-controlled runtime acceptance step.
+
+**Implementation commit:** `5461a01fc7c494cef26dcead361ae935851765d0`
+(`Add scheduled BUY/SELL click workflow`)
+
+**Legacy-workflow cleanup commit:** `69a88f3ed2c186d950270fd7f61ea33976afbe07`
+(`Remove legacy order-entry workflow`)
+
+**Probe cleanup commit:** `107934da8a7c4ee0a958c09b8d26f3441a98a707`
+(`Remove completed Pishro side probe`)
+
+### Delivered changes
+
+- Added an explicit BUY/SELL choice to the left scheduling panel. This RadioButton selection is
+  the sole authority for the session side; FastOrder does not infer a side from broker form state.
+- Added `ScheduledClickSession`, which stores only immutable broker identity, selected side, click
+  count, and exchange-clock start time, plus its own click progress and cancellation state. It does
+  not store an `Order`, symbol, ISIN, price, quantity, commission, payload, or broker credential.
+- Made each one-second slot independently reacquire the current official action through
+  `OfficialOrderUiDispatcher`, click it once, and commit progress only after the adapter reports
+  `CLICKED`.
+- Kept EasyTrader and Pishro routing separate in `BrokerOfficialOrderUiBridge`.
+- For EasyTrader, finds one visible structural order container from visible `#price`, `#quantity`,
+  and official order controls, then uses the selected side's exact `data-cy` submit selector with
+  an exact visible-text fallback (`ارسال خرید` or `ارسال فروش`).
+- For Pishro, uses the runtime-validated final-action contract directly: a visible candidate from
+  `button,[role=button],input[type=submit]`, exact class token `buy` or `sale`, and a normalized
+  label equal to or beginning with `خرید ` or `فروش `. Exactly one matching action is required.
+- Removed the obsolete Pishro buy-tab pre-arm dependency. Logged-in runtime evidence showed that
+  Pishro renders the BUY and SELL forms simultaneously and does not expose a reliable active-tab
+  marker for this operation.
+- Removed the hidden legacy Read/Prepare/Add-to-Schedule controls and their order-value-reading
+  handlers so the visible scheduled-click workflow no longer exposes the prior payload-based path.
+- Removed the temporary `Pishro Side Probe` button, result models, parser, and JavaScript after its
+  non-mutating runtime evidence established the final BUY/SELL action contracts.
+
+### Changed files
+
+- `ScheduledClickSession.cs` (new)
+- `BrokerOfficialOrderUiBridge.cs`
+- `OfficialOrderUiBridge.cs`
+- `PishroKamanOrderUiBridge.cs`
+- `MainWindow.xaml`
+- `MainWindow.xaml.cs`
+- `OrderSession.cs`
+- `OrderSubmissionValidator.cs`
+
+### Preserved behavior and non-goals
+
+- The user prepares price and quantity manually in the official broker UI. The scheduled-click
+  path does not read or modify either value and does not read symbol, ISIN, commission, total value,
+  payload, token, cookie, authorization value, request body, or browser storage.
+- The opposite side is never a fallback. Zero matches fail with `ORDER_ACTION_NOT_FOUND`, multiple
+  matches fail with `ORDER_ACTION_AMBIGUOUS`, and a unique disabled match fails with
+  `ORDER_ACTION_DISABLED`.
+- No DOM element is cached between slots. Broker rerendering is handled by reacquiring the selected
+  official action for every due slot.
+- The official visible broker UI remains the only submission path; no direct broker API `POST` was
+  added.
+- Initial TSETMC synchronization, non-reanchoring periodic validation, the ten-second freshness
+  rule, one-second cadence, missed-slot no-burst behavior, the global queue, and the central
+  dispatcher remain unchanged.
+- A slot that reports `CLICKED` is never automatically retried.
+- Multi-instance WebView2 profile isolation and FastOrder.Manager process ownership are unchanged.
+- Dual broker workspaces/tabs remain deferred to Stage 79.1.
+
+### Verification
+
+- A logged-in, non-mutating Pishro structural probe reported both final actions simultaneously:
+  one visible enabled BUY button with exact class token `buy` and one visible enabled SELL button
+  with exact class token `sale`; neither action exposed an element ID or active-tab attribute.
+- The same probe explicitly reported that order-field values, symbol, ISIN, price, quantity,
+  credential/storage data, and request bodies were not read; it performed no DOM modification,
+  side-control click, final submit click, or HTTP POST.
+- The user reported a successful Debug build after the side-specific locator change.
+- A final `dotnet build -c Debug` after removing the legacy workflow and temporary probe passed with
+  zero errors and zero warnings.
+- `git diff --check` passed apart from Git's informational LF-to-CRLF working-copy notices.
+- No live-order test was run during this completion and cleanup.
 
 ## Template for future stages
 
