@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -54,13 +54,11 @@ namespace FastOrder
                     nameof(confirmedOrderSnapshot));
             }
 
-            // Kaman's validated official BUY flow identifies the instrument by
-            // the visible symbol name. EasyTrader still requires its ISIN.
+            // Both supported broker flows identify the instrument
+            // authoritatively by the visible symbol name. ISIN is optional
+            // metadata and is not required to construct a session.
             if (string.IsNullOrWhiteSpace(
-                order.SymbolName) ||
-                (!pishroKaman &&
-                 string.IsNullOrWhiteSpace(
-                     order.SymbolIsin)))
+                order.SymbolName))
             {
                 throw new ArgumentException(
                     "Session instrument identity cannot be empty.",

@@ -103,6 +103,162 @@ namespace FastOrder
                     true
             };
 
+        /// <summary>
+        /// دکمه رسمی و قابل‌مشاهده سمت انتخاب‌شده را بدون خواندن یا تغییر هیچ‌یک از
+        /// فیلدهای سفارش دوباره پیدا می‌کند و دقیقاً یک‌بار کلیک می‌کند.
+        /// </summary>
+        public static string BuildClickCurrentOfficialOrderButtonScript(
+            ScheduledClickSide side)
+        {
+            if (side is not
+                (ScheduledClickSide.Buy or ScheduledClickSide.Sell))
+            {
+                throw new ArgumentOutOfRangeException(nameof(side));
+            }
+
+            string expectedOrigin =
+                JsonSerializer.Serialize(ExpectedOrigin);
+
+            string selectedActionSelector =
+                JsonSerializer.Serialize(
+                    side == ScheduledClickSide.Buy
+                        ? "[data-cy=\"oms-order-form-submit-button-buy\"]"
+                        : "[data-cy=\"oms-order-form-submit-button-sell\"]");
+
+            string selectedActionLabel =
+                JsonSerializer.Serialize(
+                    side == ScheduledClickSide.Buy
+                        ? "ارسال خرید"
+                        : "ارسال فروش");
+
+            return $$"""
+                (() => {
+                    const result = (status, reason) => ({ status, reason });
+                    const expectedOrigin = {{expectedOrigin}};
+                    const selectedActionSelector = {{selectedActionSelector}};
+                    const selectedActionLabel = {{selectedActionLabel}};
+                    const normalizeText = value => String(value ?? "")
+                        .replace(/[\s\u200c\u200f\u202a-\u202e]+/g, " ")
+                        .trim();
+                    const isVisible = element => {
+                        if (!(element instanceof HTMLElement)) return false;
+                        const style = getComputedStyle(element);
+                        return style.display !== "none" &&
+                            style.visibility !== "hidden" &&
+                            element.getClientRects().length > 0;
+                    };
+                    const buySelector =
+                        '[data-cy="oms-order-form-submit-button-buy"]';
+                    const sellSelector =
+                        '[data-cy="oms-order-form-submit-button-sell"]';
+                    const officialOrderControlSelector =
+                        buySelector + ',' + sellSelector;
+                    const findOrderContainers = () => {
+                        const containers = [];
+                        const quantityInputs = Array.from(
+                            document.querySelectorAll("#quantity"))
+                            .filter(input =>
+                                input instanceof HTMLInputElement &&
+                                isVisible(input));
+
+                        for (const quantityInput of quantityInputs) {
+                            let ancestor = quantityInput.parentElement;
+
+                            for (let depth = 0;
+                                depth < 24 && ancestor instanceof HTMLElement;
+                                depth += 1, ancestor = ancestor.parentElement) {
+                                if (!isVisible(ancestor)) continue;
+
+                                const priceInput =
+                                    ancestor.querySelector("#price");
+                                const attributedControls = Array.from(
+                                    ancestor.querySelectorAll(
+                                        officialOrderControlSelector))
+                                    .filter(isVisible);
+                                const labeledControls = Array.from(
+                                    ancestor.querySelectorAll("button"))
+                                    .filter(isVisible)
+                                    .filter(control => {
+                                        const label =
+                                            normalizeText(control.textContent);
+                                        return label === "ارسال خرید" ||
+                                            label === "ارسال فروش";
+                                    });
+
+                                if (priceInput instanceof HTMLInputElement &&
+                                    isVisible(priceInput) &&
+                                    (attributedControls.length > 0 ||
+                                     labeledControls.length > 0)) {
+                                    containers.push(ancestor);
+                                    break;
+                                }
+
+                                if (ancestor === document.body ||
+                                    ancestor === document.documentElement) {
+                                    break;
+                                }
+                            }
+                        }
+
+                        return Array.from(new Set(containers));
+                    };
+
+                    if (location.origin !== expectedOrigin)
+                        return result("INVALID_ORIGIN",
+                            "Official EasyTrader origin was not active.");
+
+                    const containers = findOrderContainers();
+
+                    if (containers.length === 0)
+                        return result("ORDER_ACTION_NOT_FOUND",
+                            "One visible official EasyTrader order container was not found.");
+
+                    if (containers.length !== 1)
+                        return result("ORDER_ACTION_AMBIGUOUS",
+                            "More than one visible official EasyTrader order container was found.");
+
+                    const container = containers[0];
+                    let actions = Array.from(
+                        container.querySelectorAll(selectedActionSelector))
+                        .filter(isVisible);
+
+                    if (actions.length === 0) {
+                        actions = Array.from(container.querySelectorAll("button"))
+                            .filter(isVisible)
+                            .filter(action =>
+                                normalizeText(action.textContent) ===
+                                    selectedActionLabel);
+                    }
+
+                    actions = Array.from(new Set(actions));
+
+                    if (actions.length === 0)
+                        return result("ORDER_ACTION_NOT_FOUND",
+                            "One visible official EasyTrader selected-side action was not found.");
+
+                    if (actions.length !== 1)
+                        return result("ORDER_ACTION_AMBIGUOUS",
+                            "More than one visible official EasyTrader selected-side action was found.");
+
+                    const action = actions[0];
+                    if (!(action instanceof HTMLElement))
+                        return result("ORDER_ACTION_NOT_FOUND",
+                            "Official EasyTrader selected-side action was not usable.");
+
+                    if (((action instanceof HTMLButtonElement ||
+                          action instanceof HTMLInputElement) && action.disabled) ||
+                        action.hasAttribute("disabled") ||
+                        action.getAttribute("aria-disabled") === "true")
+                        return result("ORDER_ACTION_DISABLED",
+                            "Official EasyTrader selected-side action was disabled.");
+
+                    action.click();
+                    return result("CLICKED",
+                        "Official EasyTrader selected-side action was invoked once.");
+                })()
+                """;
+        }
+
         public static string BuildOpenCurrentSymbolBuyDialogScript()
         {
             string expectedOrigin = JsonSerializer.Serialize(ExpectedOrigin);
@@ -237,8 +393,6 @@ namespace FastOrder
                             const symbolIsin = isinFrom(a);
                             const symbolName = nameFrom(a);
 
-                            if (!symbolIsin)
-                                return result("INSTRUMENT_NOT_VERIFIED","Current ISIN was not found.");
                             if (!symbolName)
                                 return result("SYMBOL_NAME_NOT_FOUND","Current symbol name was not found.");
                             if (buy.disabled || buy.getAttribute("aria-disabled")==="true")
@@ -654,8 +808,10 @@ namespace FastOrder
                     const symbolName=norm(meta.symbolName || "");
                     const symbolIsin=String(meta.symbolIsin || isinFrom(box) || "").toUpperCase();
 
-                    if (!symbolName || !symbolIsin)
-                        return result("INSTRUMENT_METADATA_NOT_READY","Instrument metadata not ready.");
+                    if (!symbolName)
+                        return result(
+                            "INSTRUMENT_METADATA_NOT_READY",
+                            "Visible symbol metadata was not ready.");
 
                     const commissionAmount =
                         summaryAmount(box, "کارمزد معامله") ||
@@ -752,8 +908,9 @@ namespace FastOrder
         }
 
         /// <summary>
-        /// اسکریپتی می‌سازد که فقط در دامنه رسمی EasyTrader، نماد و ISIN
+        /// اسکریپتی می‌سازد که فقط در دامنه رسمی EasyTrader، نام نماد
         /// تأییدشده را پیدا می‌کند و در صورت نیاز پنجره رسمی خرید را باز می‌کند.
+        /// ISIN در این مسیر اختیاری و صرفاً اطلاعات جانبی است.
         /// این مرحله دکمه «ارسال خرید» را فعال نمی‌کند و POST نمی‌فرستد.
         /// </summary>
         public static string BuildEnsureBuyDialogScript(
@@ -848,7 +1005,8 @@ namespace FastOrder
                             window[dialogRequestProperty];
 
                         if (previousRequest &&
-                            previousRequest.symbolIsin === expectedSymbolIsin &&
+                            normalizeText(previousRequest.symbolName || "") ===
+                                normalizeText(expectedSymbolName) &&
                             now - previousRequest.requestedAt < 1500) {
                             return result(
                                 "DIALOG_OPEN_REQUESTED",
@@ -856,6 +1014,7 @@ namespace FastOrder
                         }
 
                         window[dialogRequestProperty] = Object.freeze({
+                            symbolName: expectedSymbolName,
                             symbolIsin: expectedSymbolIsin,
                             requestedAt: now
                         });
@@ -919,13 +1078,7 @@ namespace FastOrder
                             currentSymbol.startsWith(expected + " ") ||
                             expected.startsWith(currentSymbol + " ");
 
-                        const isinMatches =
-                            String(currentInstrument.symbolIsin || "")
-                                .toUpperCase() ===
-                            expectedSymbolIsin.toUpperCase();
-
-                        if (!symbolMatches ||
-                            !isinMatches) {
+                        if (!symbolMatches) {
                             return result(
                                 "ACTIVE_DIALOG_MISMATCH",
                                 "An order form for a different instrument is already open.");
@@ -967,12 +1120,6 @@ namespace FastOrder
                                 continue;
                             }
 
-                            if (!containsIsin(ancestor)) {
-                                return result(
-                                    "INSTRUMENT_NOT_VERIFIED",
-                                    "ISIN was not present in the selected instrument metadata.");
-                            }
-
                             return requestBuyDialogOpen(
                                 buyButton);
                         }
@@ -1003,26 +1150,24 @@ namespace FastOrder
                                 continue;
                             }
 
-                            if (!containsIsin(ancestor)) {
-                                return result(
-                                    "INSTRUMENT_NOT_VERIFIED",
-                                    "ISIN was not present in the selected instrument metadata.");
-                            }
-
                             return requestBuyDialogOpen(
                                 buyButton);
                         }
                     }
 
-                    const selectableSymbol = symbolElements.find(element =>
-                        containsIsin(element));
-
-                    if (selectableSymbol instanceof HTMLElement) {
-                        selectableSymbol.click();
+                    if (symbolElements.length === 1 &&
+                        symbolElements[0] instanceof HTMLElement) {
+                        symbolElements[0].click();
 
                         return result(
                             "SYMBOL_SELECTION_REQUESTED",
-                            "The confirmed instrument was selected once.");
+                            "The confirmed visible symbol was selected once.");
+                    }
+
+                    if (symbolElements.length > 1) {
+                        return result(
+                            "INSTRUMENT_AMBIGUOUS",
+                            "More than one visible element matched the confirmed symbol.");
                     }
 
                     return result(
@@ -1033,8 +1178,9 @@ namespace FastOrder
         }
 
         /// <summary>
-        /// اسکریپت آماده‌سازی فرم رسمی را می‌سازد. نماد، ISIN، ورودی‌ها و دکمه
+        /// اسکریپت آماده‌سازی فرم رسمی را می‌سازد. نام نماد، ورودی‌ها و دکمه
         /// رسمی بررسی می‌شوند؛ سپس تعداد و قیمت تنظیم و با Nonce موقت قفل می‌شوند.
+        /// ISIN اختیاری است و در تطبیق اجباری ابزار شرکت نمی‌کند.
         /// خروجی PREPARED به معنی آمادگی فرم است، نه ارسال سفارش.
         /// </summary>
         public static string BuildPrepareScript(
@@ -1178,30 +1324,6 @@ namespace FastOrder
                             "Visible/current symbol did not match the confirmed order.");
                     }
 
-                    const expectedIsinUpper =
-                        expectedSymbolIsin.toUpperCase();
-
-                    const currentIsin =
-                        String(currentInstrument.symbolIsin || "")
-                            .toUpperCase();
-
-                    const instrumentElements =
-                        [dialog, ...dialog.querySelectorAll('*')];
-
-                    const isinObserved =
-                        currentIsin === expectedIsinUpper ||
-                        instrumentElements.some(element =>
-                            Array.from(element.attributes ?? []).some(attribute =>
-                                String(attribute.value ?? "")
-                                    .toUpperCase()
-                                    .includes(expectedIsinUpper)));
-
-                    if (!isinObserved) {
-                        return result(
-                            "INSTRUMENT_NOT_VERIFIED",
-                            "ISIN did not match the confirmed order.");
-                    }
-
                     const quantityInput = dialog.querySelector('#quantity');
                     const priceInput = dialog.querySelector('#price');
 
@@ -1265,7 +1387,7 @@ namespace FastOrder
         }
 
         /// <summary>
-        /// اسکریپت کلیک نهایی را می‌سازد. Nonce، نماد، ISIN، تعداد و قیمت
+        /// اسکریپت کلیک نهایی را می‌سازد. Nonce، نام نماد، تعداد و قیمت
         /// دوباره تطبیق داده می‌شوند و فقط سپس دکمه رسمی یک‌بار کلیک می‌شود.
         /// درخواست HTTP را خود EasyTrader و نشست رسمی آن ایجاد می‌کنند.
         /// </summary>
@@ -1383,7 +1505,6 @@ namespace FastOrder
                     if (!prepared ||
                         prepared.nonce !== expectedNonce ||
                         prepared.symbolName !== expectedSymbolName ||
-                        prepared.symbolIsin !== expectedSymbolIsin ||
                         prepared.quantity !== expectedQuantity ||
                         prepared.price !== expectedPrice) {
                         return result("PREPARATION_EXPIRED", "Prepared official form state was no longer valid.");
@@ -1419,30 +1540,6 @@ namespace FastOrder
                         return result(
                             "SYMBOL_MISMATCH",
                             "Visible/current symbol did not match the confirmed order.");
-                    }
-
-                    const expectedIsinUpper =
-                        expectedSymbolIsin.toUpperCase();
-
-                    const currentIsin =
-                        String(currentInstrument.symbolIsin || "")
-                            .toUpperCase();
-
-                    const instrumentElements =
-                        [dialog, ...dialog.querySelectorAll('*')];
-
-                    const isinObserved =
-                        currentIsin === expectedIsinUpper ||
-                        instrumentElements.some(element =>
-                            Array.from(element.attributes ?? []).some(attribute =>
-                                String(attribute.value ?? "")
-                                    .toUpperCase()
-                                    .includes(expectedIsinUpper)));
-
-                    if (!isinObserved) {
-                        return result(
-                            "INSTRUMENT_NOT_VERIFIED",
-                            "ISIN did not match the confirmed order.");
                     }
 
                     const quantityInput = dialog.querySelector('#quantity');

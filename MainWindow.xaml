@@ -203,25 +203,31 @@
 
                         <Button x:Name="MonitoringButton"
                                 Content="فعال‌سازی Monitoring"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 Click="MonitoringButton_Click"/>
 
                         <Button x:Name="LoginStatusButton"
                                 Content="وضعیت ورود"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 Click="LoginStatusButton_Click"/>
 
                         <Button x:Name="ReloadButton"
                                 Content="بارگذاری مجدد"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 Click="ReloadButton_Click"/>
 
-                        <Separator Margin="0,5,0,10"/>
+                        <Separator Margin="0,5,0,10"
+                                   Visibility="Collapsed"/>
 
                         <TextBlock Text="فرم و سفارش"
+                                   Visibility="Collapsed"
                                    Style="{StaticResource SectionTitleStyle}"/>
 
                         <Border Margin="0,0,0,10"
+                                Visibility="Collapsed"
                                 Padding="10"
                                 Background="#FFF8FAFB"
                                 BorderBrush="#FFD7DDE3"
@@ -329,12 +335,14 @@
 
                         <Button x:Name="PreviewOrderButton"
                                 Content="باز کردن فرم نماد جاری"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 ToolTip="فرم رسمی خرید نماد جاری EasyTrader را باز می‌کند؛ ارسال انجام نمی‌شود."
                                 Click="PreviewOrderButton_Click"/>
 
                         <Button x:Name="ReadOrderFormButton"
                                 Content="خواندن و تأیید فرم"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 IsEnabled="False"
                                 ToolTip="نماد، ISIN، قیمت و تعداد را از فرم رسمی می‌خواند؛ ارسال انجام نمی‌شود."
@@ -342,6 +350,7 @@
 
                         <Button x:Name="PrepareOrderButton"
                                 Content="آماده‌سازی محلی"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 IsEnabled="False"
                                 ToolTip="Payload و ترافیک طبیعی سایت را کنترل می‌کند؛ هیچ سفارشی ارسال نمی‌شود."
@@ -349,6 +358,7 @@
 
                         <Button x:Name="SendLiveOrderButton"
                                 Content="افزودن به زمان‌بندی"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 IsEnabled="False"
                                 Background="#FFC62828"
@@ -358,8 +368,70 @@
                                 ToolTip="پس از تأیید نهایی، در بازه تعیین‌شده تا اولین پاسخ موفق تلاش می‌کند."
                                 Click="SendLiveOrderButton_Click"/>
 
+                        <Separator Margin="0,7,0,10"/>
+
+                        <TextBlock Text="ارسال زمان‌بندی‌شده"
+                                   Style="{StaticResource SectionTitleStyle}"/>
+
+                        <TextBlock Text="سمت سفارش:"
+                                   Margin="0,0,0,5"
+                                   Foreground="#FF455A64"
+                                   FontWeight="SemiBold"/>
+
+                        <StackPanel Margin="0,0,0,8"
+                                    Orientation="Horizontal"
+                                    FlowDirection="RightToLeft">
+                            <RadioButton x:Name="ScheduledClickBuyRadioButton"
+                                         Content="خرید"
+                                         GroupName="ScheduledClickSide"
+                                         Margin="0,0,18,0"
+                                         AutomationProperties.Name="سمت خرید"/>
+                            <RadioButton x:Name="ScheduledClickSellRadioButton"
+                                         Content="فروش"
+                                         GroupName="ScheduledClickSide"
+                                         AutomationProperties.Name="سمت فروش"/>
+                        </StackPanel>
+
+                        <TextBlock Text="تعداد سفارش:"
+                                   Margin="0,0,0,5"
+                                   Foreground="#FF455A64"
+                                   FontWeight="SemiBold"/>
+
+                        <TextBox x:Name="ScheduledClickCountTextBox"
+                                 MinHeight="34"
+                                 Margin="0,0,0,8"
+                                 Padding="8,5"
+                                 FlowDirection="LeftToRight"
+                                 TextAlignment="Right"
+                                 AutomationProperties.Name="تعداد سفارش"
+                                 ToolTip="تعداد کلیک‌های رسمی سمت انتخاب‌شده؛ این مقدار تعداد سهم نیست."/>
+
+                        <TextBlock Text="زمان شروع (HH:mm:ss):"
+                                   Margin="0,0,0,5"
+                                   Foreground="#FF455A64"
+                                   FontWeight="SemiBold"/>
+
+                        <TextBox x:Name="ScheduledClickStartTimeTextBox"
+                                 MinHeight="34"
+                                 Margin="0,0,0,8"
+                                 Padding="8,5"
+                                 FlowDirection="LeftToRight"
+                                 TextAlignment="Right"
+                                 AutomationProperties.Name="زمان شروع"
+                                 ToolTip="زمان مرکز معاملات با قالب HH:mm:ss"/>
+
+                        <Button x:Name="StartScheduledClickButton"
+                                Content="شروع ارسال زمان‌بندی‌شده"
+                                Style="{StaticResource ControlButtonStyle}"
+                                Background="#FFC62828"
+                                BorderBrush="#FFB71C1C"
+                                Foreground="White"
+                                FontWeight="SemiBold"
+                                ToolTip="پس از تأیید صریح، فرم رسمی سمت انتخاب‌شده را بدون خواندن یا تغییر مقادیر کلیک می‌کند."
+                                Click="StartScheduledClickButton_Click"/>
+
                         <Button x:Name="CancelScheduledOrderButton"
-                                Content="لغو نشست انتخاب‌شده"
+                                Content="لغو نشست"
                                 Style="{StaticResource ControlButtonStyle}"
                                 IsEnabled="False"
                                 Background="#FF616161"
@@ -375,18 +447,20 @@
 
                         <Button x:Name="WebViewTimingTestButton"
                                 Content="تست زمان‌بندی WebView2"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 ToolTip="فقط زمان اجرای JavaScript را اندازه‌گیری می‌کند؛ هیچ کلیک، POST یا تغییر فرم انجام نمی‌شود."
                                 Click="WebViewTimingTestButton_Click"/>
 
                         <Button x:Name="BrokerCompatibilityProbeButton"
-                                Content="بررسی ساختاری کارگزاری"
+                                Content="Pishro Side Probe"
                                 Style="{StaticResource ControlButtonStyle}"
-                                ToolTip="فقط مشخصات ساختاری کنترل‌های قابل‌مشاهده را بدون خواندن مقدار فیلد، Token، Cookie، Header یا Body گزارش می‌کند."
+                                ToolTip="فقط ساختار کنترل‌های قابل‌مشاهده خرید/فروش پیشرو را بدون کلیک یا خواندن مقادیر سفارش گزارش می‌کند."
                                 Click="BrokerCompatibilityProbeButton_Click"/>
 
                         <Button x:Name="OrderUiDryRunTimingButton"
                                 Content="Dry-Run فرم سفارش"
+                                Visibility="Collapsed"
                                 Style="{StaticResource ControlButtonStyle}"
                                 ToolTip="فرم رسمی را پیدا و قیمت/تعداد تأییدشده را تنظیم می‌کند، اما دکمه ارسال خرید را هرگز کلیک نمی‌کند."
                                 Click="OrderUiDryRunTimingButton_Click"/>
@@ -507,13 +581,13 @@
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Grid.Column="0"
-                               Text="نشست‌های سفارش"
+                               Text="نشست‌های کلیک زمان‌بندی‌شده"
                                FontSize="14"
                                FontWeight="SemiBold"
                                Foreground="#FF263238"/>
 
                     <TextBlock Grid.Column="1"
-                               Text="Stage 79 — اجرای هم‌زمان چند نشست برای کارگزاری فعال"
+                               Text="یک کلیک رسمی سمت انتخاب‌شده در هر اسلات یک‌ثانیه‌ای"
                                HorizontalAlignment="Right"
                                FlowDirection="RightToLeft"
                                Foreground="#FF607D8B"
@@ -550,33 +624,25 @@
                                             Binding="{Binding BrokerDisplayName}"
                                             MinWidth="110"
                                             Width="Auto"/>
-                        <DataGridTextColumn Header="نماد"
-                                            Binding="{Binding SymbolName}"
-                                            MinWidth="145"
-                                            Width="1.4*"/>
+                        <DataGridTextColumn Header="سمت"
+                                            Binding="{Binding SideDisplay}"
+                                            MinWidth="64"
+                                            Width="Auto"/>
                         <DataGridTextColumn Header="وضعیت"
                                             Binding="{Binding StateDisplay}"
                                             MinWidth="105"
                                             Width="Auto"/>
-                        <DataGridTextColumn Header="کل"
-                                            Binding="{Binding TotalQuantityDisplay}"
+                        <DataGridTextColumn Header="تعداد کلیک"
+                                            Binding="{Binding TotalClickCountDisplay}"
                                             MinWidth="78"
                                             Width="Auto"/>
-                        <DataGridTextColumn Header="ارسال‌شده"
-                                            Binding="{Binding SentQuantityDisplay}"
+                        <DataGridTextColumn Header="کلیک‌شده"
+                                            Binding="{Binding ClickedCountDisplay}"
                                             MinWidth="88"
-                                            Width="Auto"/>
-                        <DataGridTextColumn Header="درحال ارسال"
-                                            Binding="{Binding InFlightQuantityDisplay}"
-                                            MinWidth="90"
                                             Width="Auto"/>
                         <DataGridTextColumn Header="باقی‌مانده"
-                                            Binding="{Binding RemainingQuantityDisplay}"
+                                            Binding="{Binding RemainingClickCountDisplay}"
                                             MinWidth="88"
-                                            Width="Auto"/>
-                        <DataGridTextColumn Header="سقف"
-                                            Binding="{Binding MaxQuantityPerOrderDisplay}"
-                                            MinWidth="70"
                                             Width="Auto"/>
                         <DataGridTextColumn Header="شروع"
                                             Binding="{Binding StartTimeDisplay}"
@@ -586,36 +652,22 @@
                                             Binding="{Binding NextDueDisplay}"
                                             MinWidth="100"
                                             Width="Auto"/>
-                        <DataGridTextColumn Header="HTTP"
-                                            Binding="{Binding LastHttpStatusDisplay}"
-                                            MinWidth="64"
-                                            Width="Auto"/>
                         <DataGridTextColumn Header="آخرین وضعیت"
                                             Binding="{Binding LastStatus}"
                                             MinWidth="180"
                                             Width="2*"/>
                         <DataGridTemplateColumn Header="عملیات"
-                                                MinWidth="190"
+                                                MinWidth="74"
                                                 Width="Auto">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Horizontal"
                                                 FlowDirection="RightToLeft">
-                                        <Button Content="مکث"
-                                                Margin="2"
-                                                Padding="8,3"
-                                                ToolTip="فقط ایجاد اسلات جدید این نشست را متوقف می‌کند."
-                                                Click="PauseOrderSessionButton_Click"/>
-                                        <Button Content="ادامه"
-                                                Margin="2"
-                                                Padding="8,3"
-                                                ToolTip="نشست متوقف را از اولین اسلات آینده ادامه می‌دهد."
-                                                Click="ResumeOrderSessionButton_Click"/>
                                         <Button Content="لغو"
                                                 Margin="2"
                                                 Padding="8,3"
                                                 ToolTip="فقط همین نشست را لغو می‌کند؛ کلیک انجام‌شده قابل بازگردانی نیست."
-                                                Click="CancelOrderSessionButton_Click"/>
+                                                Click="CancelScheduledClickSessionButton_Click"/>
                                     </StackPanel>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>

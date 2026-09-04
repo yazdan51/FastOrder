@@ -20,6 +20,27 @@ namespace FastOrder
                 ? PishroKamanOrderUiBridge.BuildReadCurrentOrderFormScript()
                 : OfficialOrderUiBridge.BuildReadCurrentOrderFormScript();
 
+        public static string BuildPishroSideStructuralProbeScript(
+            BrokerProfile broker)
+        {
+            if (!IsPishroKaman(broker))
+            {
+                throw new InvalidOperationException(
+                    "The side structural probe is only available for Pishro Kaman.");
+            }
+
+            return PishroKamanOrderUiBridge
+                .BuildSideStructuralProbeScript();
+        }
+
+        public static string BuildClickCurrentOfficialOrderButtonScript(
+            BrokerProfile broker,
+            ScheduledClickSide side) =>
+            IsPishroKaman(broker)
+                ? PishroKamanOrderUiBridge.BuildClickCurrentOfficialOrderButtonScript(
+                    side)
+                : OfficialOrderUiBridge.BuildClickCurrentOfficialOrderButtonScript(side);
+
         public static string BuildEnsureBuyDialogScript(
             BrokerProfile broker,
             Order order) =>

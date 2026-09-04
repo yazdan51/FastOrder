@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -54,12 +55,19 @@ namespace FastOrder
         private ConfirmedOrderSnapshot? _currentOrderSnapshot;
         private readonly ObservableCollection<OrderSession> _orderSessions =
             new ObservableCollection<OrderSession>();
+        private readonly ObservableCollection<ScheduledClickSession>
+            _scheduledClickSessions =
+                new ObservableCollection<ScheduledClickSession>();
         private long _nextOrderSessionSequence = 0;
+        private long _nextScheduledClickSessionSequence = 0;
         private readonly object _sessionExecutionsSyncRoot =
             new object();
         private readonly Dictionary<Guid, OrderSessionExecution>
             _activeSessionExecutions =
                 new Dictionary<Guid, OrderSessionExecution>();
+        private readonly Dictionary<Guid, ScheduledClickExecution>
+            _activeScheduledClickExecutions =
+                new Dictionary<Guid, ScheduledClickExecution>();
         private bool _sessionCreationInProgress = false;
         private readonly object _scheduledClockRefreshSyncRoot =
             new object();
@@ -163,7 +171,7 @@ namespace FastOrder
                 ExchangeClockDisplayTimer_Tick;
 
             SessionDataGrid.ItemsSource =
-                _orderSessions;
+                _scheduledClickSessions;
 
             _officialUiDispatcher.StateChanged +=
                 OfficialUiDispatcher_StateChanged;
@@ -2403,6 +2411,675 @@ namespace FastOrder
             }
         }
 
+        private async void StartScheduledClickButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!EnsureSelectedBrokerOrderUiAvailable(
+                "schedule-official-order-clicks"))
+            {
+                return;
+            }
+
+            if (_sessionCreationInProgress ||
+                _liveSubmissionInProgress)
+            {
+                SetStatus(
+                    "تأیید یا ارسال کنترل‌شده دیگری در حال انجام است.");
+
+                return;
+            }
+
+            ScheduledClickSide selectedSide;
+
+            if (ScheduledClickBuyRadioButton.IsChecked == true &&
+                ScheduledClickSellRadioButton.IsChecked != true)
+            {
+                selectedSide = ScheduledClickSide.Buy;
+            }
+            else if (ScheduledClickSellRadioButton.IsChecked == true &&
+                ScheduledClickBuyRadioButton.IsChecked != true)
+            {
+                selectedSide = ScheduledClickSide.Sell;
+            }
+            else
+            {
+                SetStatus(
+                    "پیش از زمان‌بندی، سمت خرید یا فروش را صریحاً انتخاب کنید.");
+                return;
+            }
+
+            if (!TryParseScheduledClickCount(
+                ScheduledClickCountTextBox.Text,
+                out int clickCount,
+                out string countError))
+            {
+                SetStatus(countError);
+                ScheduledClickCountTextBox.Focus();
+                return;
+            }
+
+            if (!TimeOnly.TryParseExact(
+                ScheduledClickStartTimeTextBox.Text?.Trim(),
+                "HH:mm:ss",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out TimeOnly requestedStartTime))
+            {
+                SetStatus(
+                    "زمان شروع را دقیقاً با قالب HH:mm:ss وارد کنید.");
+                ScheduledClickStartTimeTextBox.Focus();
+                return;
+            }
+
+            if (!_webViewReady || Browser.CoreWebView2 == null)
+            {
+                SetStatus(
+                    "صفحه رسمی " + _selectedBroker.DisplayName +
+                    " هنوز آماده نیست.");
+                return;
+            }
+
+            CoreWebView2 coreWebView =
+                Browser.CoreWebView2;
+
+            if (!_selectedBroker.IsTrustedPage(coreWebView.Source))
+            {
+                SetStatus(
+                    "صفحه فعال متعلق به مسیر رسمی کارگزاری انتخاب‌شده نیست.");
+                return;
+            }
+
+            _sessionCreationInProgress = true;
+            SetScheduledOrderControls(_scheduledOrderActive);
+
+            try
+            {
+                ExchangeClockReading reading;
+                bool hasActiveExecution;
+
+                lock (_sessionExecutionsSyncRoot)
+                {
+                    hasActiveExecution =
+                        _activeSessionExecutions.Count > 0 ||
+                        _activeScheduledClickExecutions.Count > 0;
+                }
+
+                SetStatus(
+                    hasActiveExecution
+                        ? "در حال اعتبارسنجی ساعت مرکز معاملات..."
+                        : "در حال همگام‌سازی ساعت مرکز معاملات...");
+
+                reading = hasActiveExecution
+                    ? await _exchangeClock.ValidateAsync(
+                        3,
+                        _applicationCancellation.Token)
+                    : await _exchangeClock.SynchronizeAsync(
+                        3,
+                        _applicationCancellation.Token);
+
+                DateTime startDateTime =
+                    DateTime.SpecifyKind(
+                        reading.Now.Date + requestedStartTime.ToTimeSpan(),
+                        DateTimeKind.Unspecified);
+
+                DateTimeOffset startTime =
+                    new DateTimeOffset(
+                        startDateTime,
+                        reading.Now.Offset);
+
+                if (startTime <= reading.Now)
+                {
+                    SetStatus(
+                        "زمان شروع باید در آینده همان روز مرکز معاملات باشد.");
+                    return;
+                }
+
+                DateTimeOffset lastTarget =
+                    startTime.AddSeconds(clickCount - 1L);
+
+                string sideDisplay =
+                    selectedSide == ScheduledClickSide.Buy
+                        ? "خرید (BUY)"
+                        : "فروش (SELL)";
+
+                string confirmationText =
+                    "کارگزاری: " + _selectedBroker.DisplayName +
+                    Environment.NewLine +
+                    "سمت: " + sideDisplay +
+                    Environment.NewLine +
+                    "تعداد کلیک: " + clickCount.ToString(
+                        CultureInfo.InvariantCulture) +
+                    Environment.NewLine +
+                    "زمان شروع: " + startTime.ToString(
+                        "HH:mm:ss",
+                        CultureInfo.InvariantCulture) +
+                    Environment.NewLine +
+                    "آخرین اسلات: " + lastTarget.ToString(
+                        "HH:mm:ss",
+                        CultureInfo.InvariantCulture) +
+                    Environment.NewLine +
+                    "نرخ اجرا: یک کلیک رسمی " + sideDisplay +
+                    " در هر ثانیه" +
+                    Environment.NewLine + Environment.NewLine +
+                    "FastOrder فرم رسمی سمت انتخاب‌شده را دقیقاً با مقادیر فعلی آن کلیک می‌کند." +
+                    Environment.NewLine +
+                    "نماد، قیمت و تعداد توسط FastOrder خوانده یا اعتبارسنجی نشده‌اند." +
+                    Environment.NewLine + Environment.NewLine +
+                    "آیا این نشست واقعی فعال شود؟";
+
+                MessageBoxResult confirmation =
+                    MessageBox.Show(
+                        this,
+                        confirmationText,
+                        "تأیید نهایی ارسال زمان‌بندی‌شده",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning,
+                        MessageBoxResult.No,
+                        MessageBoxOptions.RtlReading |
+                        MessageBoxOptions.RightAlign);
+
+                if (confirmation != MessageBoxResult.Yes)
+                {
+                    SetStatus("ایجاد نشست لغو شد؛ هیچ کلیکی انجام نشد.");
+                    return;
+                }
+
+                ExchangeClockReading validatedReading =
+                    await _exchangeClock.ValidateAsync(
+                        1,
+                        _applicationCancellation.Token);
+
+                if (startTime <= validatedReading.Now)
+                {
+                    SetStatus(
+                        "زمان شروع هنگام تأیید سپری شد؛ نشست ایجاد نشد.");
+                    return;
+                }
+
+                if (!_selectedBroker.IsTrustedPage(coreWebView.Source))
+                {
+                    SetStatus(
+                        "صفحه رسمی کارگزاری هنگام تأیید تغییر کرد؛ نشست ایجاد نشد.");
+                    return;
+                }
+
+                ScheduledClickSession session =
+                    new ScheduledClickSession(
+                        Interlocked.Increment(
+                            ref _nextScheduledClickSessionSequence),
+                        _selectedBroker,
+                        selectedSide,
+                        clickCount,
+                        startTime);
+
+                _scheduledClickSessions.Add(session);
+                SessionDataGrid.SelectedItem = session;
+                SessionDataGrid.ScrollIntoView(session);
+
+                WriteImportant("");
+                WriteImportant("========================================");
+                WriteImportant("SCHEDULED CLICK SESSION CREATED");
+                WriteImportant("========================================");
+                WriteImportant(
+                    "SESSION: " + session.SessionIdDisplay);
+                WriteImportant(
+                    "BROKER: " + session.BrokerDisplayName);
+                WriteImportant(
+                    "SIDE: " +
+                    (session.Side == ScheduledClickSide.Buy
+                        ? "BUY"
+                        : "SELL"));
+                WriteImportant(
+                    "CLICK COUNT: " + clickCount.ToString(
+                        CultureInfo.InvariantCulture));
+                WriteImportant(
+                    "START TIME: " + startTime.ToString(
+                        "yyyy-MM-dd HH:mm:ss.fff zzz",
+                        CultureInfo.InvariantCulture));
+                WriteImportant("ORDER VALUES READ: NO");
+                WriteImportant("ORDER FIELDS MODIFIED: NO");
+                WriteImportant("DIRECT API CREDENTIALS: NOT ACCESSED");
+                WriteImportant("========================================");
+
+                RegisterScheduledClickSession(
+                    coreWebView,
+                    session);
+
+                SetStatus(
+                    "نشست کلیک زمان‌بندی‌شده ایجاد و مسلح شد.");
+            }
+            catch (OperationCanceledException)
+            {
+                SetStatus("ایجاد نشست لغو شد؛ هیچ کلیک جدیدی انجام نشد.");
+            }
+            catch (Exception ex)
+            {
+                WriteImportant(
+                    "SCHEDULED CLICK SESSION CREATION FAILED: " + ex.Message);
+                SetStatus(
+                    "نشست ایجاد نشد: " + ex.Message);
+            }
+            finally
+            {
+                _sessionCreationInProgress = false;
+                SetScheduledOrderControls(_scheduledOrderActive);
+            }
+        }
+
+        private static bool TryParseScheduledClickCount(
+            string? input,
+            out int clickCount,
+            out string error)
+        {
+            StringBuilder normalized = new StringBuilder();
+
+            foreach (char character in input?.Trim() ?? "")
+            {
+                if (character is >= '\u06F0' and <= '\u06F9')
+                {
+                    normalized.Append(
+                        (char)('0' + character - '\u06F0'));
+                }
+                else if (character is >= '\u0660' and <= '\u0669')
+                {
+                    normalized.Append(
+                        (char)('0' + character - '\u0660'));
+                }
+                else
+                {
+                    normalized.Append(character);
+                }
+            }
+
+            if (!int.TryParse(
+                normalized.ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out clickCount))
+            {
+                error = "تعداد سفارش الزامی است و باید یک عدد صحیح باشد.";
+                return false;
+            }
+
+            if (clickCount is < 1 or > 1000)
+            {
+                error = "تعداد سفارش باید بین ۱ و ۱۰۰۰ باشد.";
+                return false;
+            }
+
+            error = "";
+            return true;
+        }
+
+        private void RegisterScheduledClickSession(
+            CoreWebView2 coreWebView,
+            ScheduledClickSession session)
+        {
+            ArgumentNullException.ThrowIfNull(coreWebView);
+            ArgumentNullException.ThrowIfNull(session);
+
+            ScheduledClickExecution execution =
+                new ScheduledClickExecution(session);
+
+            lock (_sessionExecutionsSyncRoot)
+            {
+                if (!_activeScheduledClickExecutions.TryAdd(
+                    session.SessionId,
+                    execution))
+                {
+                    execution.Dispose();
+                    throw new InvalidOperationException(
+                        "An active scheduled-click execution already exists for this session.");
+                }
+            }
+
+            RefreshScheduledOrderActivityState();
+            EnsureScheduledClockRefreshActive();
+
+            Task schedulerTask =
+                RunScheduledClickSessionAsync(
+                    coreWebView,
+                    execution);
+
+            _ = ObserveScheduledClickTaskAsync(
+                execution,
+                schedulerTask);
+        }
+
+        private async Task ObserveScheduledClickTaskAsync(
+            ScheduledClickExecution execution,
+            Task schedulerTask)
+        {
+            try
+            {
+                await schedulerTask;
+            }
+            catch (Exception ex)
+            {
+                if (execution.Session.State is not
+                    (OrderSessionState.Completed or
+                     OrderSessionState.Canceled or
+                     OrderSessionState.Failed))
+                {
+                    execution.Session.SetState(
+                        OrderSessionState.Failed,
+                        "خطای پیش‌بینی‌نشده زمان‌بند: " + ex.Message);
+                }
+
+                WriteImportant(
+                    "SCHEDULED CLICK UNOBSERVED ERROR: " + ex.Message);
+            }
+            finally
+            {
+                lock (_sessionExecutionsSyncRoot)
+                {
+                    if (_activeScheduledClickExecutions.TryGetValue(
+                        execution.Session.SessionId,
+                        out ScheduledClickExecution? currentExecution) &&
+                        ReferenceEquals(currentExecution, execution))
+                    {
+                        _activeScheduledClickExecutions.Remove(
+                            execution.Session.SessionId);
+                    }
+                }
+
+                execution.Dispose();
+                RefreshScheduledOrderActivityState();
+                StopScheduledClockRefreshIfIdle();
+            }
+        }
+
+        private async Task RunScheduledClickSessionAsync(
+            CoreWebView2 coreWebView,
+            ScheduledClickExecution execution)
+        {
+            ScheduledClickSession session = execution.Session;
+            BrokerProfile broker =
+                BrokerProfiles.ResolveOrDefault(session.BrokerId);
+            string sideName =
+                session.Side == ScheduledClickSide.Buy
+                    ? "BUY"
+                    : "SELL";
+
+            using CancellationTokenSource linkedCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    execution.CancellationToken,
+                    _applicationCancellation.Token);
+
+            CancellationToken cancellationToken =
+                linkedCancellation.Token;
+
+            int skippedSlotCount = 0;
+
+            try
+            {
+                if (!string.Equals(
+                    broker.Id,
+                    _selectedBroker.Id,
+                    StringComparison.Ordinal))
+                {
+                    session.SetState(
+                        OrderSessionState.Failed,
+                        "کارگزاری نشست با صفحه فعال تطبیق ندارد.");
+                    return;
+                }
+
+                session.SetState(
+                    OrderSessionState.Waiting,
+                    "در انتظار نخستین اسلات");
+
+                for (int slotIndex = 0;
+                    slotIndex < session.TotalClickCount;
+                    slotIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    DateTimeOffset target =
+                        session.StartTime.AddSeconds(slotIndex);
+                    DateTimeOffset deadline =
+                        target.Add(ScheduledOrderRetryDelay);
+
+                    session.UpdateProgress(
+                        execution.ClickedCount,
+                        target,
+                        "در انتظار اسلات " +
+                        (slotIndex + 1).ToString(CultureInfo.InvariantCulture));
+
+                    await WaitUntilExchangeTimeAsync(
+                        target,
+                        cancellationToken);
+
+                    DateTimeOffset actual =
+                        GetFreshExchangeTime();
+
+                    WriteImportant("");
+                    WriteImportant("CLOCK SLOT STARTED");
+                    WriteImportant(
+                        "SESSION: " + session.SessionIdDisplay);
+                    WriteImportant(
+                        "SLOT: " + (slotIndex + 1).ToString(
+                            CultureInfo.InvariantCulture));
+                    WriteImportant(
+                        "TARGET: " + target.ToString(
+                            "HH:mm:ss.fff",
+                            CultureInfo.InvariantCulture));
+                    WriteImportant(
+                        "ACTUAL: " + actual.ToString(
+                            "HH:mm:ss.fff",
+                            CultureInfo.InvariantCulture));
+
+                    if (actual >= deadline)
+                    {
+                        skippedSlotCount++;
+                        session.UpdateProgress(
+                            execution.ClickedCount,
+                            slotIndex + 1 < session.TotalClickCount
+                                ? session.StartTime.AddSeconds(slotIndex + 1L)
+                                : null,
+                            "اسلات ازدست‌رفته؛ بدون جبران فشرده");
+                        WriteImportant(
+                            "OFFICIAL " + sideName + " CLICKED: NO");
+                        WriteImportant("RESULT: MISSED SLOT — NO BURST CATCH-UP");
+                        continue;
+                    }
+
+                    session.SetState(
+                        OrderSessionState.Running,
+                        "در حال اجرای کلیک رسمی");
+
+                    OfficialOrderUiBridgeResult clickResult;
+
+                    try
+                    {
+                        clickResult =
+                            await _officialUiDispatcher.DispatchAsync(
+                                "scheduled-official-order-click:" + sideName,
+                                "در حال اجرای کلیک رسمی " +
+                                session.SideDisplay + "...",
+                                async dispatcherCancellationToken =>
+                                {
+                                    dispatcherCancellationToken
+                                        .ThrowIfCancellationRequested();
+
+                                    if (!broker.IsTrustedPage(coreWebView.Source))
+                                    {
+                                        return new OfficialOrderUiBridgeResult
+                                        {
+                                            Status = "INVALID_ORIGIN",
+                                            Reason = "The active page is not a trusted broker origin."
+                                        };
+                                    }
+
+                                    if (GetFreshExchangeTime() >= deadline)
+                                    {
+                                        return new OfficialOrderUiBridgeResult
+                                        {
+                                            Status = "SLOT_MISSED",
+                                            Reason = "The one-second slot expired before dispatch."
+                                        };
+                                    }
+
+                                    string resultJson =
+                                        await coreWebView.ExecuteScriptAsync(
+                                            BrokerOfficialOrderUiBridge
+                                                .BuildClickCurrentOfficialOrderButtonScript(
+                                                    broker,
+                                                    session.Side));
+
+                                    return OfficialOrderUiBridge.ParseResult(
+                                        resultJson);
+                                },
+                                cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                        when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        session.SetState(
+                            OrderSessionState.Failed,
+                            "نتیجه کلیک رسمی مبهم است؛ ادامه نشست متوقف شد.");
+                        WriteImportant(
+                            "OFFICIAL " + sideName +
+                            " CLICK RESULT: AMBIGUOUS");
+                        WriteImportant("AUTO RETRY: NO");
+                        WriteImportant("REASON: " + ex.Message);
+                        return;
+                    }
+
+                    if (clickResult.HasStatus(
+                        OfficialOrderUiBridge.ClickedStatus))
+                    {
+                        int clickedCount = execution.CommitClicked();
+                        int remainingClickCount =
+                            session.TotalClickCount - clickedCount;
+                        DateTimeOffset? nextDue =
+                            slotIndex + 1 < session.TotalClickCount
+                                ? session.StartTime.AddSeconds(slotIndex + 1L)
+                                : null;
+
+                        session.UpdateProgress(
+                            clickedCount,
+                            nextDue,
+                            "کلیک رسمی " + session.SideDisplay + " انجام شد");
+
+                        WriteImportant(
+                            "OFFICIAL " + sideName + " CLICKED");
+                        WriteImportant(
+                            "CLICKED COUNT: " + clickedCount.ToString(
+                                CultureInfo.InvariantCulture));
+                        WriteImportant(
+                            "REMAINING CLICK COUNT: " +
+                            remainingClickCount.ToString(
+                                CultureInfo.InvariantCulture));
+
+                        continue;
+                    }
+
+                    if (clickResult.HasStatus("SLOT_MISSED"))
+                    {
+                        skippedSlotCount++;
+                    }
+
+                    session.UpdateProgress(
+                        execution.ClickedCount,
+                        slotIndex + 1 < session.TotalClickCount
+                            ? session.StartTime.AddSeconds(slotIndex + 1L)
+                            : null,
+                        clickResult.Status + ": " + clickResult.Reason);
+
+                    WriteImportant(
+                        "OFFICIAL " + sideName + " CLICKED: NO");
+                    WriteImportant("STATUS: " + clickResult.Status);
+                    WriteImportant("REASON: " + clickResult.Reason);
+                    WriteImportant("AUTO RETRY FOR THIS SLOT: NO");
+
+                    if (!IsDefinitivePreClickFailure(clickResult.Status))
+                    {
+                        session.SetState(
+                            OrderSessionState.Failed,
+                            "نتیجه کلیک رسمی قابل اثبات نیست؛ ادامه نشست متوقف شد.");
+                        return;
+                    }
+
+                    session.SetState(
+                        OrderSessionState.Waiting,
+                        "اسلات بدون کلیک پایان یافت؛ در انتظار اسلات بعدی");
+                }
+
+                session.SetState(
+                    OrderSessionState.Completed,
+                    "برنامه اسلات‌ها تکمیل شد؛ کلیک‌شده: " +
+                    execution.ClickedCount.ToString(CultureInfo.InvariantCulture) +
+                    "، بدون کلیک: " +
+                    (session.TotalClickCount - execution.ClickedCount)
+                        .ToString(CultureInfo.InvariantCulture) +
+                    (skippedSlotCount > 0
+                        ? "، اسلات ازدست‌رفته: " + skippedSlotCount.ToString(
+                            CultureInfo.InvariantCulture)
+                        : ""));
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                session.UpdateProgress(
+                    execution.ClickedCount,
+                    null,
+                    "لغو شد؛ کلیک‌های انجام‌شده بازگردانده نمی‌شوند");
+                session.SetState(
+                    OrderSessionState.Canceled,
+                    "لغو شد؛ کلیک‌های انجام‌شده بازگردانده نمی‌شوند");
+            }
+            catch (Exception ex)
+            {
+                session.SetState(
+                    OrderSessionState.Failed,
+                    "زمان‌بند برای جلوگیری از کلیک نامطمئن متوقف شد: " +
+                    ex.Message);
+                WriteImportant(
+                    "SCHEDULED CLICK SESSION FAILED: " + ex.Message);
+            }
+        }
+
+        private async Task WaitUntilExchangeTimeAsync(
+            DateTimeOffset targetTime,
+            CancellationToken cancellationToken)
+        {
+            TimeSpan maximumWaitChunk =
+                TimeSpan.FromSeconds(1);
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                TimeSpan remaining =
+                    targetTime - GetFreshExchangeTime();
+
+                if (remaining <= TimeSpan.Zero)
+                {
+                    return;
+                }
+
+                await Task.Delay(
+                    remaining < maximumWaitChunk
+                        ? remaining
+                        : maximumWaitChunk,
+                    cancellationToken);
+            }
+        }
+
+        private static bool IsDefinitivePreClickFailure(
+            string status) =>
+            status is
+                "INVALID_ORIGIN" or
+                "ORDER_ACTION_NOT_FOUND" or
+                "ORDER_ACTION_AMBIGUOUS" or
+                "ORDER_ACTION_DISABLED" or
+                "SLOT_MISSED";
+
         private void RegisterScheduledOrderSession(
             CoreWebView2 coreWebView,
             OrderSession session)
@@ -2532,7 +3209,8 @@ namespace FastOrder
             lock (_sessionExecutionsSyncRoot)
             {
                 _scheduledOrderActive =
-                    _activeSessionExecutions.Count > 0;
+                    _activeSessionExecutions.Count > 0 ||
+                    _activeScheduledClickExecutions.Count > 0;
             }
 
             SetScheduledOrderControls(
@@ -2562,7 +3240,8 @@ namespace FastOrder
         {
             lock (_sessionExecutionsSyncRoot)
             {
-                if (_activeSessionExecutions.Count > 0)
+                if (_activeSessionExecutions.Count > 0 ||
+                    _activeScheduledClickExecutions.Count > 0)
                 {
                     return;
                 }
@@ -4572,8 +5251,8 @@ namespace FastOrder
                 !_liveSubmissionInProgress;
 
             bool selectedSessionActive =
-                SessionDataGrid.SelectedItem is OrderSession selectedSession &&
-                TryGetActiveSessionExecution(
+                SessionDataGrid.SelectedItem is ScheduledClickSession selectedSession &&
+                TryGetActiveScheduledClickExecution(
                     selectedSession.SessionId,
                     out _);
 
@@ -4585,6 +5264,21 @@ namespace FastOrder
 
             LoginButton.IsEnabled =
                 !isActive;
+
+            StartScheduledClickButton.IsEnabled =
+                orderEntryOperationAvailable;
+
+            ScheduledClickCountTextBox.IsEnabled =
+                !_sessionCreationInProgress;
+
+            ScheduledClickStartTimeTextBox.IsEnabled =
+                !_sessionCreationInProgress;
+
+            ScheduledClickBuyRadioButton.IsEnabled =
+                !_sessionCreationInProgress;
+
+            ScheduledClickSellRadioButton.IsEnabled =
+                !_sessionCreationInProgress;
 
             PreviewOrderButton.IsEnabled =
                 orderEntryOperationAvailable;
@@ -5332,8 +6026,8 @@ namespace FastOrder
         // =====================================================
 
         /// <summary>
-        /// تست فقط زمان‌بندی ExecuteScriptAsync را اندازه‌گیری می‌کند.
-        /// هیچ کلیک، تغییر فرم، درخواست شبکه یا دسترسی به اطلاعات احراز هویت ندارد.
+        /// ساختار کنترل‌های قابل‌مشاهده تغییر سمت پیشرو را بدون کلیک، تغییر DOM،
+        /// خواندن مقدار سفارش یا دسترسی به اطلاعات احراز هویت گزارش می‌کند.
         /// </summary>
         private async void BrokerCompatibilityProbeButton_Click(
             object sender,
@@ -5345,6 +6039,19 @@ namespace FastOrder
                 SetStatus(
                     "بررسی ساختاری هنگام زمان‌بندی یا ارسال فعال مجاز نیست.");
 
+                return;
+            }
+
+            BrokerProfile broker =
+                _selectedBroker;
+
+            if (!string.Equals(
+                broker.Id,
+                BrokerProfiles.PishroKamanId,
+                StringComparison.Ordinal))
+            {
+                SetStatus(
+                    "Pishro Side Probe فقط روی مسیر رسمی کارگزاری پیشرو اجرا می‌شود.");
                 return;
             }
 
@@ -5367,22 +6074,22 @@ namespace FastOrder
 
                 string json =
                     await _officialUiDispatcher.DispatchAsync(
-                        "broker-compatibility-probe",
-                        "در حال بررسی ساختاری رابط " +
-                        _selectedBroker.DisplayName +
-                        "...",
+                        "pishro-side-structural-probe",
+                        "در حال بررسی ساختاری کنترل‌های خرید/فروش پیشرو...",
                         async cancellationToken =>
                         {
                             cancellationToken.ThrowIfCancellationRequested();
 
                             return await coreWebView.ExecuteScriptAsync(
-                                BrokerCompatibilityProbe.BuildScript(
-                                    _selectedBroker.TrustedOrigins));
+                                BrokerOfficialOrderUiBridge
+                                    .BuildPishroSideStructuralProbeScript(
+                                        broker));
                         });
 
-                BrokerCompatibilityProbeResult result =
-                    BrokerCompatibilityProbe.ParseResult(
-                        json);
+                PishroSideStructuralProbeResult result =
+                    PishroKamanOrderUiBridge
+                        .ParseSideStructuralProbeResult(
+                            json);
 
                 string reportJson =
                     JsonSerializer.Serialize(
@@ -5400,19 +6107,29 @@ namespace FastOrder
                 WriteImportant(
                     "========================================");
                 WriteImportant(
-                    "BROKER COMPATIBILITY PROBE");
+                    "PISHRO SIDE STRUCTURAL PROBE");
                 WriteImportant(
                     "========================================");
                 WriteImportant(
                     "BROKER: " +
-                    _selectedBroker.DisplayName);
+                    broker.DisplayName);
                 WriteImportant(
                     "STATUS: " +
                     result.Status);
                 WriteImportant(
-                    "FIELD VALUES: NOT READ");
+                    "CANDIDATE COUNT: " +
+                    result.CandidateCount.ToString(
+                        CultureInfo.InvariantCulture));
                 WriteImportant(
-                    "TOKEN / COOKIE / HEADER VALUE / BODY: NOT READ");
+                    "ORDER FIELD VALUES: NOT READ");
+                WriteImportant(
+                    "SYMBOL / ISIN / PRICE / QUANTITY: NOT READ");
+                WriteImportant(
+                    "TOKEN / COOKIE / STORAGE / REQUEST BODY: NOT READ");
+                WriteImportant(
+                    "DOM MODIFIED: NO");
+                WriteImportant(
+                    "SIDE CONTROL CLICK: NO");
                 WriteImportant(
                     "FINAL SUBMIT CLICK: NO");
                 WriteImportant(
@@ -5424,11 +6141,10 @@ namespace FastOrder
 
                 SetStatus(
                     result.Status ==
-                    BrokerCompatibilityProbe.ReadyStatus
-                        ? "گزارش ساختاری امن رابط " +
-                          _selectedBroker.DisplayName +
-                          " ثبت شد."
-                        : "بررسی ساختاری انجام نشد: " +
+                    PishroKamanOrderUiBridge
+                        .SideStructuralProbeReadyStatus
+                        ? "گزارش ساختاری امن کنترل‌های خرید/فروش پیشرو ثبت شد."
+                        : "بررسی ساختاری پیشرو انجام نشد: " +
                           result.Status);
             }
             catch (Exception ex)
@@ -5443,7 +6159,8 @@ namespace FastOrder
             finally
             {
                 BrokerCompatibilityProbeButton.IsEnabled =
-                    true;
+                    !_scheduledOrderActive &&
+                    !_liveSubmissionInProgress;
             }
         }
 
@@ -6113,7 +6830,7 @@ namespace FastOrder
             RoutedEventArgs e)
         {
             if (SessionDataGrid.SelectedItem is not
-                OrderSession selectedSession)
+                ScheduledClickSession selectedSession)
             {
                 SetStatus(
                     "ابتدا یک نشست فعال را از جدول انتخاب کنید.");
@@ -6121,9 +6838,80 @@ namespace FastOrder
                 return;
             }
 
-            RequestSessionCancellation(
+            RequestScheduledClickCancellation(
                 selectedSession,
                 "لغو نشست توسط کاربر درخواست شد.");
+        }
+
+        private void CancelScheduledClickSessionButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not
+                ScheduledClickSession session)
+            {
+                SetStatus("نشست انتخاب‌شده معتبر نیست.");
+                return;
+            }
+
+            RequestScheduledClickCancellation(
+                session,
+                "لغو نشست توسط کاربر درخواست شد.");
+        }
+
+        private bool TryGetActiveScheduledClickExecution(
+            Guid sessionId,
+            out ScheduledClickExecution? execution)
+        {
+            lock (_sessionExecutionsSyncRoot)
+            {
+                return _activeScheduledClickExecutions.TryGetValue(
+                    sessionId,
+                    out execution);
+            }
+        }
+
+        private List<ScheduledClickExecution>
+            GetActiveScheduledClickExecutionSnapshot()
+        {
+            lock (_sessionExecutionsSyncRoot)
+            {
+                return new List<ScheduledClickExecution>(
+                    _activeScheduledClickExecutions.Values);
+            }
+        }
+
+        private void RequestScheduledClickCancellation(
+            ScheduledClickSession session,
+            string reason)
+        {
+            if (!TryGetActiveScheduledClickExecution(
+                session.SessionId,
+                out ScheduledClickExecution? execution) ||
+                execution == null ||
+                !execution.RequestCancel())
+            {
+                SetStatus("این نشست دیگر فعال یا قابل لغو نیست.");
+                return;
+            }
+
+            session.UpdateProgress(
+                execution.ClickedCount,
+                null,
+                "لغو درخواست شد؛ کلیک در حال اجرا تعیین تکلیف می‌شود");
+
+            WriteImportant("");
+            WriteImportant(
+                "SCHEDULED CLICK CANCELLATION REQUESTED: " +
+                session.SessionIdDisplay);
+            WriteImportant("NEW OFFICIAL ORDER CLICKS: BLOCKED");
+            WriteImportant("ALREADY CLICKED ORDERS: NOT UNDONE");
+
+            SetStatus(
+                "لغو نشست " + session.SessionIdDisplay +
+                " ثبت شد؛ کلیک‌های انجام‌شده بازگردانده نمی‌شوند.");
+
+            SetScheduledOrderControls(_scheduledOrderActive);
         }
 
         private void SessionDataGrid_SelectionChanged(
@@ -6441,6 +7229,18 @@ namespace FastOrder
                 {
                     _globalNextDueQueue.RemoveSession(
                         execution.Session.SessionId);
+                }
+            }
+
+            foreach (ScheduledClickExecution execution in
+                GetActiveScheduledClickExecutionSnapshot())
+            {
+                if (execution.RequestCancel())
+                {
+                    execution.Session.UpdateProgress(
+                        execution.ClickedCount,
+                        null,
+                        reason);
                 }
             }
 

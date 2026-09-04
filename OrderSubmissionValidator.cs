@@ -106,21 +106,10 @@ namespace FastOrder
                     BrokerProfiles.PishroKamanId,
                     StringComparison.Ordinal);
 
-            if (!pishroKaman &&
-                (string.IsNullOrWhiteSpace(order.SymbolIsin) ||
-                 !Regex.IsMatch(
-                    order.SymbolIsin,
-                    "^[A-Z0-9]{12}$",
-                    RegexOptions.CultureInvariant |
-                    RegexOptions.NonBacktracking,
-                    TimeSpan.FromMilliseconds(100))))
-            {
-                return OrderSubmissionValidationResult.Invalid(
-                    "ISIN معتبر نیست.");
-            }
-
-            if (pishroKaman &&
-                !string.IsNullOrWhiteSpace(order.SymbolIsin) &&
+            // Instrument identity is authoritative by visible SymbolName for
+            // both supported brokers. ISIN is optional; when present, it is
+            // still validated as non-authoritative metadata.
+            if (!string.IsNullOrWhiteSpace(order.SymbolIsin) &&
                 !Regex.IsMatch(
                     order.SymbolIsin,
                     "^[A-Z0-9]{12}$",
