@@ -424,12 +424,6 @@
                                 ToolTip="فقط زمان اجرای JavaScript را اندازه‌گیری می‌کند؛ هیچ کلیک، POST یا تغییر فرم انجام نمی‌شود."
                                 Click="WebViewTimingTestButton_Click"/>
 
-                        <Button x:Name="BrokerCompatibilityProbeButton"
-                                Content="Pishro Side Probe"
-                                Style="{StaticResource ControlButtonStyle}"
-                                ToolTip="فقط ساختار کنترل‌های قابل‌مشاهده خرید/فروش پیشرو را بدون کلیک یا خواندن مقادیر سفارش گزارش می‌کند."
-                                Click="BrokerCompatibilityProbeButton_Click"/>
-
                         <Button x:Name="OrderUiDryRunTimingButton"
                                 Content="Dry-Run فرم سفارش"
                                 Visibility="Collapsed"
