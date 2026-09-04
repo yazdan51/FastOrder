@@ -52,4 +52,6 @@ logs/
 
 # NuGet
 *.nupkg
-*.snupkg
+*.snupkgcommit_push.cmd
+
+commit_push.cmd
