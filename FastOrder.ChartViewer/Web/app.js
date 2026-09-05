@@ -426,9 +426,12 @@
     }
 
     function formatNumber(value, digits) {
+        const safeDigits = Number.isInteger(digits)
+            ? Math.max(0, Math.min(20, digits))
+            : 0;
         return Number(value).toLocaleString("en-US", {
-            minimumFractionDigits: digits,
-            maximumFractionDigits: digits
+            minimumFractionDigits: safeDigits,
+            maximumFractionDigits: safeDigits
         });
     }
 
