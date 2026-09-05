@@ -7,8 +7,33 @@
     const longButton = document.getElementById("long-tool");
     const shortButton = document.getElementById("short-tool");
     const deleteButton = document.getElementById("delete-tool");
+    const saveButton = document.getElementById("save-tool");
+    const loadButton = document.getElementById("load-tool");
     const statusOutput = document.getElementById("interaction-status");
     const symbolName = document.getElementById("symbol-name");
+    const realtimeStatus = document.getElementById("realtime-status");
+    const positionForm = document.getElementById("position-form");
+    const noSelection = document.getElementById("no-selection");
+    const selectedPositionSide = document.getElementById("selected-position-side");
+    const propertyInputs = new Map(
+        Array.from(positionForm.querySelectorAll("[data-field]"))
+            .map(input => [input.dataset.field, input]));
+    const metricOutputs = Object.freeze({
+        riskDistance: document.getElementById("risk-distance"),
+        rewardDistance: document.getElementById("reward-distance"),
+        rewardRisk: document.getElementById("reward-risk"),
+        riskAmount: document.getElementById("risk-amount"),
+        riskQuantity: document.getElementById("risk-quantity"),
+        leverageQuantity: document.getElementById("leverage-quantity"),
+        finalQuantity: document.getElementById("final-quantity"),
+        profitPnl: document.getElementById("profit-pnl"),
+        lossPnl: document.getElementById("loss-pnl"),
+        balanceTp: document.getElementById("balance-tp"),
+        balanceSl: document.getElementById("balance-sl"),
+        metadataSymbol: document.getElementById("metadata-symbol"),
+        metadataTick: document.getElementById("metadata-tick"),
+        metadataQuantity: document.getElementById("metadata-quantity")
+    });
 
     const positions = new Map();
     const geometries = new Map();
@@ -134,6 +159,7 @@
             const side = positions.get(id).side;
             setStatus(`${side} Position انتخاب شد.`);
         }
+        renderProperties();
         renderDrawings();
     }
 
@@ -141,6 +167,80 @@
         if (selectedId) {
             postMessage({ type: "deletePosition", id: selectedId });
         }
+    }
+
+    function renderProperties() {
+        const position = selectedId ? positions.get(selectedId) : null;
+        positionForm.hidden = !position;
+        noSelection.hidden = Boolean(position);
+        selectedPositionSide.textContent = position
+            ? `${position.side} · ${position.id.slice(0, 8)}`
+            : "No selection";
+
+        if (!position) {
+            return;
+        }
+
+        const inputValues = {
+            entryPrice: position.entryPrice,
+            stopPrice: position.stopPrice,
+            targetPrice: position.targetPrice,
+            accountSize: position.accountSize,
+            riskMode: position.riskMode,
+            riskValue: position.riskValue,
+            lotSize: position.symbol.lotSize,
+            pointValue: position.symbol.pointValue,
+            leverage: position.leverage,
+            quantityPrecision: position.symbol.quantityPrecision
+        };
+        for (const [field, value] of Object.entries(inputValues)) {
+            const input = propertyInputs.get(field);
+            if (input) {
+                input.value = String(value);
+            }
+        }
+
+        const priceDigits = inferPriceDigits(position.symbol.tickSize);
+        const quantityDigits = Number(position.symbol.quantityPrecision);
+        metricOutputs.riskDistance.textContent =
+            `${formatNumber(position.riskPerUnit, priceDigits)} (${formatNumber(position.riskPercent, 2)}%)`;
+        metricOutputs.rewardDistance.textContent =
+            `${formatNumber(position.rewardPerUnit, priceDigits)} (${formatNumber(position.rewardPercent, 2)}%)`;
+        metricOutputs.rewardRisk.textContent = formatNumber(position.rewardToRiskRatio, 2);
+        metricOutputs.riskAmount.textContent = formatNumber(position.riskAmount, 2);
+        metricOutputs.riskQuantity.textContent = formatNumber(position.riskLimitedQuantity, quantityDigits);
+        metricOutputs.leverageQuantity.textContent = formatNumber(position.leverageLimitedQuantity, quantityDigits);
+        metricOutputs.finalQuantity.textContent = formatNumber(position.finalQuantity, quantityDigits);
+        metricOutputs.profitPnl.textContent = formatNumber(position.profitPnl, 2);
+        metricOutputs.lossPnl.textContent = formatNumber(position.lossPnl, 2);
+        metricOutputs.balanceTp.textContent = formatNumber(position.accountBalanceAfterTp, 2);
+        metricOutputs.balanceSl.textContent = formatNumber(position.accountBalanceAfterSl, 2);
+        metricOutputs.metadataSymbol.textContent =
+            `${position.symbol.symbolId} · ${position.timeframe}`;
+        metricOutputs.metadataTick.textContent = formatNumber(position.symbol.tickSize, priceDigits);
+        metricOutputs.metadataQuantity.textContent =
+            `${formatNumber(position.symbol.quantityStep, quantityDigits)} / ${formatNumber(position.symbol.minimumQuantity, quantityDigits)}`;
+    }
+
+    function submitPropertyEdit(input) {
+        if (!selectedId || !positions.has(selectedId) || !input.checkValidity()) {
+            setStatus("مقدار ورودی معتبر نیست.", true);
+            return;
+        }
+
+        const field = input.dataset.field;
+        const value = input instanceof HTMLSelectElement ? input.value : Number(input.value);
+        if (!field || (typeof value === "number" && !Number.isFinite(value))) {
+            setStatus("مقدار ورودی معتبر نیست.", true);
+            return;
+        }
+
+        postMessage({
+            type: "editPosition",
+            id: selectedId,
+            field,
+            value
+        });
     }
 
     function nearestBarIndex(time) {
@@ -256,21 +356,22 @@
         context.lineWidth = selected ? 1.5 : 1;
         context.strokeRect(leftX, geometry.topY, width, geometry.bottomY - geometry.topY);
 
-        const priceDigits = inferPriceDigits();
+        const priceDigits = inferPriceDigits(position.symbol.tickSize);
+        const quantityDigits = Number(position.symbol.quantityPrecision);
         drawLabel(
             rightX,
             targetY,
-            `TP ${formatNumber(position.targetPrice, priceDigits)}  +${formatNumber(position.rewardPercent, 2)}%  Δ ${formatNumber(position.rewardPerUnit, priceDigits)}`,
+            `TP ${formatNumber(position.targetPrice, priceDigits)}  +${formatNumber(position.rewardPercent, 2)}%  PnL ${formatNumber(position.profitPnl, 2)}`,
             "#126a61");
         drawLabel(
             rightX,
             entryY,
-            `Entry ${formatNumber(position.entryPrice, priceDigits)}  R:R ${formatNumber(position.rewardToRiskRatio, 2)}`,
+            `Entry ${formatNumber(position.entryPrice, priceDigits)}  Qty ${formatNumber(position.finalQuantity, quantityDigits)}  R:R ${formatNumber(position.rewardToRiskRatio, 2)}`,
             "#35475a");
         drawLabel(
             rightX,
             stopY,
-            `SL ${formatNumber(position.stopPrice, priceDigits)}  -${formatNumber(position.riskPercent, 2)}%  Δ -${formatNumber(position.riskPerUnit, priceDigits)}`,
+            `SL ${formatNumber(position.stopPrice, priceDigits)}  -${formatNumber(position.riskPercent, 2)}%  PnL ${formatNumber(position.lossPnl, 2)}`,
             "#862f3a");
 
         if (selected) {
@@ -315,10 +416,13 @@
         context.fillText(text, x + paddingX, top + labelHeight / 2);
     }
 
-    function inferPriceDigits() {
-        const tick = Number(window.symbolMetadata?.tickSize ?? 1);
-        const text = tick.toString();
-        return text.includes(".") ? text.length - text.indexOf(".") - 1 : 0;
+    function inferPriceDigits(tickSize = window.symbolMetadata?.tickSize ?? 1) {
+        const tick = Number(tickSize);
+        if (!Number.isFinite(tick) || Number.isInteger(tick)) {
+            return 0;
+        }
+
+        return Math.min(8, tick.toFixed(8).replace(/0+$/, "").split(".")[1]?.length ?? 0);
     }
 
     function formatNumber(value, digits) {
@@ -477,8 +581,23 @@
     longButton.addEventListener("click", () => setActiveTool("Long"));
     shortButton.addEventListener("click", () => setActiveTool("Short"));
     deleteButton.addEventListener("click", deleteSelected);
+    saveButton.addEventListener("click", () => postMessage({ type: "savePositions" }));
+    loadButton.addEventListener("click", () => postMessage({ type: "loadPositions" }));
+    positionForm.addEventListener("change", event => {
+        const input = event.target;
+        if (input instanceof HTMLInputElement || input instanceof HTMLSelectElement) {
+            submitPropertyEdit(input);
+        }
+    });
 
     document.addEventListener("keydown", event => {
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+            if (event.key === "Escape") {
+                event.target.blur();
+            }
+            return;
+        }
+
         if (event.key === "Delete" || event.key === "Backspace") {
             event.preventDefault();
             deleteSelected();
@@ -495,29 +614,55 @@
         }
     });
 
+    window.addEventListener("error", event => {
+        postMessage({
+            type: "clientError",
+            message: String(event.message || "Unknown JavaScript runtime error").slice(0, 500)
+        });
+    });
+
+    window.addEventListener("unhandledrejection", event => {
+        postMessage({
+            type: "clientError",
+            message: String(event.reason || "Unhandled JavaScript rejection").slice(0, 500)
+        });
+    });
+
     window.chrome?.webview?.addEventListener("message", event => {
         const message = event.data;
         switch (message?.type) {
             case "initialize":
                 window.symbolMetadata = message.symbol;
-                symbolName.textContent = message.symbol.symbol;
+                symbolName.textContent = message.symbol.symbolId;
                 barTimes.splice(0, barTimes.length, ...message.bars.map(bar => bar.time));
                 candleSeries.applyOptions({
                     priceFormat: {
                         type: "price",
-                        precision: inferPriceDigits(),
+                        precision: inferPriceDigits(message.symbol.tickSize),
                         minMove: Number(message.symbol.tickSize)
                     }
                 });
                 candleSeries.setData(message.bars);
                 chart.timeScale().fitContent();
-                setStatus("Long یا Short را انتخاب کنید؛ سپس روی نمودار کلیک کنید.");
+                setStatus(`Long یا Short را انتخاب کنید. ذخیره محلی: ${message.persistenceFileName}`);
                 renderDrawings();
                 break;
             case "positionState":
                 positions.set(message.position.id, message.position);
                 selectPosition(message.position.id);
                 break;
+            case "positionsReplaced": {
+                const previousSelection = selectedId;
+                positions.clear();
+                for (const position of message.positions) {
+                    positions.set(position.id, position);
+                }
+                const replacementSelection = positions.has(previousSelection)
+                    ? previousSelection
+                    : positions.keys().next().value ?? null;
+                selectPosition(replacementSelection);
+                break;
+            }
             case "positionDeleted":
                 positions.delete(message.id);
                 if (selectedId === message.id) {
@@ -532,10 +677,15 @@
                 if (!barTimes.includes(message.bar.time)) {
                     barTimes.push(message.bar.time);
                 }
+                realtimeStatus.textContent =
+                    `Realtime mock: ${message.updateCount} · Positions: ${message.positionCount}`;
                 renderDrawings();
                 break;
             case "bridgeError":
                 setStatus(message.message, true);
+                break;
+            case "operationStatus":
+                setStatus(message.message);
                 break;
             default:
                 break;

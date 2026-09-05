@@ -19,6 +19,14 @@
                 <span aria-hidden="true">↘</span>
                 <span>Short</span>
             </button>
+            <button id="save-tool" class="tool-button secondary" type="button" title="ذخیره موقعیت‌ها در JSON محلی">
+                <span aria-hidden="true">⇩</span>
+                <span>Save</span>
+            </button>
+            <button id="load-tool" class="tool-button secondary" type="button" title="بارگذاری موقعیت‌ها از JSON محلی">
+                <span aria-hidden="true">⇧</span>
+                <span>Load</span>
+            </button>
             <button id="delete-tool" class="tool-button danger" type="button" disabled title="حذف موقعیت انتخاب‌شده (Delete)">
                 <span aria-hidden="true">×</span>
                 <span>Delete</span>
@@ -29,9 +37,12 @@
             <header class="chart-header">
                 <div>
                     <strong id="symbol-name">POC</strong>
-                    <span class="analysis-only">Analysis only · local mock data</span>
+                    <span class="analysis-only">Analysis only · mock/non-authoritative metadata</span>
                 </div>
-                <output id="interaction-status" aria-live="polite">یک ابزار را انتخاب کنید.</output>
+                <div class="status-stack">
+                    <output id="interaction-status" aria-live="polite">یک ابزار را انتخاب کنید.</output>
+                    <span id="realtime-status">Realtime mock: 0</span>
+                </div>
             </header>
             <div id="chart-host">
                 <canvas id="drawing-overlay" aria-hidden="true"></canvas>
@@ -41,6 +52,96 @@
                 <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a>
             </footer>
         </section>
+
+        <aside id="properties-panel" class="properties-panel" aria-label="ویژگی‌های موقعیت انتخاب‌شده">
+            <header class="properties-header">
+                <div>
+                    <h1>Position Properties</h1>
+                    <span id="selected-position-side">No selection</span>
+                </div>
+                <span class="local-badge">C# authoritative</span>
+            </header>
+
+            <div id="no-selection" class="empty-properties">
+                برای ویرایش ورودی‌ها، یک Long/Short Position را روی نمودار انتخاب کنید.
+            </div>
+
+            <form id="position-form" class="position-form" autocomplete="off" hidden>
+                <fieldset>
+                    <legend>Inputs</legend>
+                    <label>
+                        <span>Entry Price</span>
+                        <input id="entry-price" data-field="entryPrice" type="number" min="0" step="any" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Stop Price</span>
+                        <input id="stop-price" data-field="stopPrice" type="number" min="0" step="any" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Target / Profit Price</span>
+                        <input id="target-price" data-field="targetPrice" type="number" min="0" step="any" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Account Size</span>
+                        <input id="account-size" data-field="accountSize" type="number" min="0" step="any" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Risk Mode</span>
+                        <select id="risk-mode" data-field="riskMode">
+                            <option value="PercentOfAccount">Percent of account</option>
+                            <option value="Absolute">Absolute amount</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Risk Value</span>
+                        <input id="risk-value" data-field="riskValue" type="number" min="0" step="any" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Lot Size</span>
+                        <input id="lot-size" data-field="lotSize" type="number" min="0" step="any" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Point Value</span>
+                        <input id="point-value" data-field="pointValue" type="number" min="0" step="any" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Leverage</span>
+                        <input id="leverage" data-field="leverage" type="number" min="0" step="any" inputmode="decimal">
+                    </label>
+                    <label>
+                        <span>Quantity Precision</span>
+                        <input id="quantity-precision" data-field="quantityPrecision" type="number" min="0" max="8" step="1" inputmode="numeric">
+                    </label>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Derived metrics</legend>
+                    <dl class="metrics-grid">
+                        <div><dt>Risk distance</dt><dd id="risk-distance">—</dd></div>
+                        <div><dt>Reward distance</dt><dd id="reward-distance">—</dd></div>
+                        <div><dt>R:R</dt><dd id="reward-risk">—</dd></div>
+                        <div><dt>Risk amount</dt><dd id="risk-amount">—</dd></div>
+                        <div><dt>Risk-limited qty</dt><dd id="risk-quantity">—</dd></div>
+                        <div><dt>Leverage-limited qty</dt><dd id="leverage-quantity">—</dd></div>
+                        <div><dt>Final qty</dt><dd id="final-quantity">—</dd></div>
+                        <div><dt>Profit PnL</dt><dd id="profit-pnl" class="positive">—</dd></div>
+                        <div><dt>Loss PnL</dt><dd id="loss-pnl" class="negative">—</dd></div>
+                        <div><dt>Balance after TP</dt><dd id="balance-tp">—</dd></div>
+                        <div><dt>Balance after SL</dt><dd id="balance-sl">—</dd></div>
+                    </dl>
+                </fieldset>
+
+                <section class="metadata-card" aria-label="متادیتای نمایشی بازار ایران">
+                    <strong>Iran-market metadata demo</strong>
+                    <dl>
+                        <div><dt>Symbol / timeframe</dt><dd id="metadata-symbol">—</dd></div>
+                        <div><dt>Tick size</dt><dd id="metadata-tick">—</dd></div>
+                        <div><dt>Quantity step / minimum</dt><dd id="metadata-quantity">—</dd></div>
+                    </dl>
+                    <p>این profile صرفاً mock و غیرمرجع است؛ قانون واقعی بورس یا نماد را ادعا نمی‌کند.</p>
+                </section>
+            </form>
+        </aside>
     </main>
 
     <script src="vendor/lightweight-charts.standalone.production.js"></script>

@@ -18,13 +18,15 @@ body {
 }
 
 button,
+input,
+select,
 output {
     font: inherit;
 }
 
 .workspace {
     display: grid;
-    grid-template-columns: 76px minmax(0, 1fr);
+    grid-template-columns: 76px minmax(0, 1fr) minmax(286px, 326px);
     direction: ltr;
     width: 100%;
     height: 100%;
@@ -72,6 +74,11 @@ output {
 
 .tool-button.danger {
     margin-top: auto;
+}
+
+.tool-button.secondary {
+    min-height: 50px;
+    color: #b9d8f7;
 }
 
 .tool-button.danger:not(:disabled) {
@@ -132,6 +139,17 @@ output {
     color: #ff9ba7;
 }
 
+.status-stack {
+    display: grid;
+    justify-items: end;
+    gap: 2px;
+}
+
+#realtime-status {
+    color: #6f859b;
+    font-size: 11px;
+}
+
 #chart-host {
     position: relative;
     min-width: 0;
@@ -152,4 +170,198 @@ output {
 .chart-footer a {
     color: #6eb7ff;
     white-space: nowrap;
+}
+
+.properties-panel {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    direction: rtl;
+    background: #131e2b;
+    border-left: 1px solid #26384d;
+}
+
+.properties-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 58px;
+    padding: 9px 12px;
+    border-bottom: 1px solid #26384d;
+    direction: ltr;
+}
+
+.properties-header h1 {
+    margin: 0 0 3px;
+    color: #f4f7fa;
+    font-size: 14px;
+}
+
+#selected-position-side {
+    color: #8ea2b7;
+    font-size: 11px;
+}
+
+.local-badge {
+    padding: 3px 6px;
+    border: 1px solid #315d80;
+    border-radius: 999px;
+    color: #84c7ff;
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.empty-properties {
+    align-self: start;
+    margin: 16px 12px;
+    padding: 14px;
+    border: 1px dashed #344b64;
+    border-radius: 7px;
+    color: #8ea2b7;
+    font-size: 12px;
+    line-height: 1.8;
+}
+
+.position-form {
+    min-height: 0;
+    padding: 12px;
+    overflow: auto;
+    direction: ltr;
+}
+
+.position-form[hidden] {
+    display: none;
+}
+
+.position-form fieldset {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin: 0 0 12px;
+    padding: 10px;
+    border: 1px solid #2d4156;
+    border-radius: 8px;
+}
+
+.position-form legend {
+    padding: 0 5px;
+    color: #8ea2b7;
+    font-size: 11px;
+}
+
+.position-form label {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    color: #9fb0c1;
+    font-size: 11px;
+}
+
+.position-form input,
+.position-form select {
+    width: 100%;
+    min-width: 0;
+    height: 30px;
+    padding: 4px 7px;
+    border: 1px solid #344b64;
+    border-radius: 5px;
+    outline: none;
+    background: #0f1824;
+    color: #eef4fa;
+}
+
+.position-form input:focus,
+.position-form select:focus {
+    border-color: #3b9cff;
+    box-shadow: 0 0 0 1px #3b9cff inset;
+}
+
+.position-form input:invalid {
+    border-color: #a14a54;
+}
+
+.metrics-grid {
+    display: contents;
+    margin: 0;
+}
+
+.metrics-grid > div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    padding: 7px;
+    border-radius: 5px;
+    background: #0f1824;
+}
+
+.metrics-grid dt,
+.metadata-card dt {
+    color: #7f93a8;
+    font-size: 10px;
+}
+
+.metrics-grid dd,
+.metadata-card dd {
+    margin: 0;
+    overflow: hidden;
+    color: #e7edf5;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.metrics-grid dd.positive {
+    color: #63d6c8;
+}
+
+.metrics-grid dd.negative {
+    color: #ff8c98;
+}
+
+.metadata-card {
+    padding: 10px;
+    border: 1px solid #66572c;
+    border-radius: 8px;
+    background: #292413;
+}
+
+.metadata-card strong {
+    color: #ecd27c;
+    font-size: 12px;
+}
+
+.metadata-card dl {
+    display: grid;
+    gap: 7px;
+    margin: 9px 0;
+}
+
+.metadata-card dl > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.metadata-card p {
+    margin: 0;
+    direction: rtl;
+    color: #baa968;
+    font-size: 10px;
+    line-height: 1.65;
+}
+
+@media (max-width: 1080px) {
+    .workspace {
+        grid-template-columns: 68px minmax(0, 1fr) 286px;
+    }
+
+    .position-form {
+        padding: 8px;
+    }
+
+    .position-form fieldset {
+        padding: 8px;
+    }
 }

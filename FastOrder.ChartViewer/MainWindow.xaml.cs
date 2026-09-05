@@ -16,6 +16,7 @@ namespace FastOrder.ChartViewer;
 public partial class MainWindow : Window
 {
     private const string LocalHostName = "chartviewer.local";
+    private const string MockTimeframe = "1m";
     private const int MaximumIncomingMessageLength = 16_384;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -23,15 +24,24 @@ public partial class MainWindow : Window
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    private readonly Dictionary<Guid, PositionDrawing> _drawings = [];
+    private readonly PositionWorkspace _workspace = new();
     private readonly IranMarketNormalizationAdapter _normalizationAdapter = new();
-    private readonly SymbolMetadata _symbol = new(
-        "POC_IR_SAMPLE",
+    private readonly SymbolMetadata _mockSymbol = new(
+        "IR_DEMO_MOCK",
         tickSize: 10m,
-        quantityStep: 1m,
-        minimumQuantity: 1m,
+        quantityStep: 100m,
+        minimumQuantity: 100m,
         pointValue: 1m,
-        lotSize: 1m);
+        lotSize: 1m,
+        quantityPrecision: 0);
+    private readonly PositionSizingInputs _defaultSizingInputs = new(
+        accountSize: 1_000_000_000m,
+        RiskInputMode.PercentOfAccount,
+        riskValue: 1m,
+        leverage: 1m);
+    private readonly LocalPositionStore _positionStore = new();
+    private readonly SemaphoreSlim _persistenceGate = new(1, 1);
+    private readonly CancellationTokenSource _shutdown = new();
     private readonly DispatcherTimer _realtimeTimer = new()
     {
         Interval = TimeSpan.FromMilliseconds(1_500)
@@ -41,6 +51,7 @@ public partial class MainWindow : Window
 
     private bool _bridgeReady;
     private int _updatesOnCurrentBar;
+    private long _realtimeUpdateCount;
 
     public MainWindow()
     {
@@ -128,7 +139,7 @@ public partial class MainWindow : Window
         e.State = CoreWebView2PermissionState.Deny;
     }
 
-    private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
         if (!IsTrustedLocalUri(e.Source))
         {
@@ -142,10 +153,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        Guid? requestedPositionId = null;
         try
         {
             using var document = JsonDocument.Parse(messageJson);
             var root = document.RootElement;
+            requestedPositionId = OptionalGuid(root, "id");
             var type = RequiredString(root, "type");
 
             switch (type)
@@ -162,21 +175,43 @@ public partial class MainWindow : Window
                 case "movePosition":
                     MovePosition(root);
                     break;
+                case "editPosition":
+                    EditPosition(root);
+                    break;
                 case "deletePosition":
                     DeletePosition(root);
+                    break;
+                case "savePositions":
+                    await SavePositionsAsync(_shutdown.Token);
+                    break;
+                case "loadPositions":
+                    await LoadPositionsAsync(_shutdown.Token);
+                    break;
+                case "clientError":
+                    ReportClientError(root);
                     break;
                 default:
                     SendBridgeError("نوع پیام پشتیبانی نمی‌شود.");
                     break;
             }
         }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+        }
         catch (Exception exception) when (
             exception is JsonException or
             ArgumentException or
             InvalidOperationException or
+            NotSupportedException or
+            IOException or
+            UnauthorizedAccessException or
             OverflowException)
         {
             SendBridgeError(exception.Message);
+            if (requestedPositionId is Guid id && _workspace.TryGet(id, out var current))
+            {
+                SendPosition(current);
+            }
         }
     }
 
@@ -192,17 +227,12 @@ public partial class MainWindow : Window
         PostMessage(new
         {
             type = "initialize",
-            symbol = new
-            {
-                _symbol.Symbol,
-                _symbol.TickSize,
-                _symbol.QuantityStep,
-                _symbol.MinimumQuantity
-            },
-            bars = _bars
+            symbol = BuildSymbolPayload(_mockSymbol),
+            bars = _bars,
+            persistenceFileName = Path.GetFileName(_positionStore.FilePath)
         });
 
-        StatusTextBlock.Text = "آماده — نمودار کاملاً محلی و فقط برای تحلیل است.";
+        StatusTextBlock.Text = "آماده — داده و متادیتا نمایشی‌اند؛ ابزار فقط برای تحلیل است.";
         _realtimeTimer.Start();
     }
 
@@ -220,20 +250,22 @@ public partial class MainWindow : Window
             new ChartHorizontalRange(
                 RequiredDouble(root, "startTime"),
                 RequiredDouble(root, "endTime")),
-            _symbol,
+            _mockSymbol,
             _normalizationAdapter);
+        var position = new PositionAnalysisState(
+            drawing,
+            MockTimeframe,
+            _defaultSizingInputs,
+            _mockSymbol);
 
-        _drawings.Add(drawing.Id, drawing);
-        SendPosition(drawing);
+        _workspace.Add(position);
+        SendPosition(position);
     }
 
     private void UpdatePosition(JsonElement root)
     {
         var id = RequiredGuid(root, "id");
-        if (!_drawings.TryGetValue(id, out var drawing))
-        {
-            throw new ArgumentException("Position پیدا نشد.");
-        }
+        var position = _workspace.GetRequired(id);
 
         var handleText = RequiredString(root, "handle");
         if (!Enum.TryParse<PositionHandle>(handleText, ignoreCase: true, out var handle) ||
@@ -244,30 +276,30 @@ public partial class MainWindow : Window
 
         var proposedPrice = _normalizationAdapter.NormalizePrice(
             RequiredDecimal(root, "proposedPrice"),
-            _symbol,
+            position.SymbolMetadata,
             StepRoundingMode.Nearest);
 
-        var updated = PositionDrawingEditor.UpdatePriceClamped(
-            drawing,
+        var drawing = PositionDrawingEditor.UpdatePriceClamped(
+            position.Drawing,
             handle,
             proposedPrice,
-            _symbol.TickSize);
+            position.SymbolMetadata.TickSize);
+        var updated = position.WithDrawing(drawing);
 
-        _drawings[id] = updated;
+        _workspace.Update(updated);
         SendPosition(updated);
     }
 
     private void MovePosition(JsonElement root)
     {
         var id = RequiredGuid(root, "id");
-        if (!_drawings.TryGetValue(id, out var drawing))
-        {
-            throw new ArgumentException("Position پیدا نشد.");
-        }
+        var position = _workspace.GetRequired(id);
+        var drawing = position.Drawing;
+        var symbol = position.SymbolMetadata;
 
         var proposedEntry = _normalizationAdapter.NormalizePrice(
             RequiredDecimal(root, "proposedEntryPrice"),
-            _symbol,
+            symbol,
             StepRoundingMode.Nearest);
         var proposedStart = RequiredDouble(root, "proposedStartTime");
 
@@ -275,54 +307,206 @@ public partial class MainWindow : Window
             drawing.EntryPrice,
             Math.Min(drawing.TargetPrice, drawing.StopPrice));
         var requestedPriceDelta = proposedEntry - drawing.EntryPrice;
-        var minimumPriceDelta = _symbol.TickSize - lowestPrice;
+        var minimumPriceDelta = symbol.TickSize - lowestPrice;
 
-        var updated = PositionDrawingEditor.Move(
+        var updatedDrawing = PositionDrawingEditor.Move(
             drawing,
             Math.Max(requestedPriceDelta, minimumPriceDelta),
             proposedStart - drawing.HorizontalRange.Start);
+        var updated = position.WithDrawing(updatedDrawing);
 
-        _drawings[id] = updated;
+        _workspace.Update(updated);
         SendPosition(updated);
+    }
+
+    private void EditPosition(JsonElement root)
+    {
+        var id = RequiredGuid(root, "id");
+        var position = _workspace.GetRequired(id);
+        var field = RequiredString(root, "field");
+
+        var updated = field switch
+        {
+            "entryPrice" => UpdatePriceFromPanel(position, PositionHandle.Entry, RequiredDecimal(root, "value")),
+            "stopPrice" => UpdatePriceFromPanel(position, PositionHandle.Stop, RequiredDecimal(root, "value")),
+            "targetPrice" => UpdatePriceFromPanel(position, PositionHandle.Target, RequiredDecimal(root, "value")),
+            "accountSize" => position.WithSizingInputs(
+                position.SizingInputs.WithAccountSize(RequiredDecimal(root, "value"))),
+            "riskMode" => position.WithSizingInputs(
+                position.SizingInputs.WithRiskMode(RequiredRiskMode(root, "value"))),
+            "riskValue" => position.WithSizingInputs(
+                position.SizingInputs.WithRiskValue(RequiredDecimal(root, "value"))),
+            "leverage" => position.WithSizingInputs(
+                position.SizingInputs.WithLeverage(RequiredDecimal(root, "value"))),
+            "pointValue" => position.WithSymbolMetadata(
+                position.SymbolMetadata.WithSizing(
+                    RequiredDecimal(root, "value"),
+                    position.SymbolMetadata.LotSize,
+                    position.SymbolMetadata.QuantityPrecision)),
+            "lotSize" => position.WithSymbolMetadata(
+                position.SymbolMetadata.WithSizing(
+                    position.SymbolMetadata.PointValue,
+                    RequiredDecimal(root, "value"),
+                    position.SymbolMetadata.QuantityPrecision)),
+            "quantityPrecision" => position.WithSymbolMetadata(
+                position.SymbolMetadata.WithSizing(
+                    position.SymbolMetadata.PointValue,
+                    position.SymbolMetadata.LotSize,
+                    RequiredInt(root, "value"))),
+            _ => throw new ArgumentException("فیلد Position پشتیبانی نمی‌شود.")
+        };
+
+        _workspace.Update(updated);
+        SendPosition(updated);
+    }
+
+    private PositionAnalysisState UpdatePriceFromPanel(
+        PositionAnalysisState position,
+        PositionHandle handle,
+        decimal proposedPrice)
+    {
+        var symbol = position.SymbolMetadata;
+        var normalizedPrice = _normalizationAdapter.NormalizePrice(
+            proposedPrice,
+            symbol,
+            StepRoundingMode.Nearest);
+        var drawing = PositionDrawingEditor.UpdatePriceClamped(
+            position.Drawing,
+            handle,
+            normalizedPrice,
+            symbol.TickSize);
+        return position.WithDrawing(drawing);
     }
 
     private void DeletePosition(JsonElement root)
     {
         var id = RequiredGuid(root, "id");
-        if (_drawings.Remove(id))
+        if (_workspace.Remove(id))
         {
             PostMessage(new { type = "positionDeleted", id });
         }
     }
 
-    private void SendPosition(PositionDrawing drawing)
+    private async Task SavePositionsAsync(CancellationToken cancellationToken)
     {
-        var metrics = RiskRewardCalculator.Calculate(drawing);
+        await _persistenceGate.WaitAsync(cancellationToken);
+        try
+        {
+            await _positionStore.SaveAsync(_workspace.Positions, cancellationToken);
+            SendOperationStatus(
+                $"{_workspace.Count} Position در فایل محلی {Path.GetFileName(_positionStore.FilePath)} ذخیره شد.");
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
+    }
+
+    private async Task LoadPositionsAsync(CancellationToken cancellationToken)
+    {
+        await _persistenceGate.WaitAsync(cancellationToken);
+        try
+        {
+            var positions = await _positionStore.LoadAsync(cancellationToken);
+            if (positions is null)
+            {
+                SendOperationStatus("هنوز فایل ذخیره‌شده‌ای وجود ندارد.");
+                return;
+            }
+
+            _workspace.ReplaceAll(positions);
+            PostMessage(new
+            {
+                type = "positionsReplaced",
+                positions = _workspace.Positions.Select(BuildPositionPayload).ToArray()
+            });
+            SendOperationStatus($"{_workspace.Count} Position از فایل محلی بارگذاری شد.");
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
+    }
+
+    private void SendPosition(PositionAnalysisState position)
+    {
         PostMessage(new
         {
             type = "positionState",
-            position = new
-            {
-                drawing.Id,
-                side = drawing.Side.ToString(),
-                drawing.EntryPrice,
-                drawing.StopPrice,
-                drawing.TargetPrice,
-                startTime = drawing.HorizontalRange.Start,
-                endTime = drawing.HorizontalRange.End,
-                metrics.RiskPerUnit,
-                metrics.RewardPerUnit,
-                metrics.RiskPercent,
-                metrics.RewardPercent,
-                metrics.RewardToRiskRatio
-            }
+            position = BuildPositionPayload(position)
         });
+    }
+
+    private object BuildPositionPayload(PositionAnalysisState position)
+    {
+        var drawing = position.Drawing;
+        var inputs = position.SizingInputs;
+        var metrics = PositionAnalysisCalculator.Calculate(position, _normalizationAdapter);
+        var riskReward = metrics.RiskReward;
+        var sizing = metrics.Sizing;
+        var pnl = metrics.Pnl;
+
+        return new
+        {
+            drawing.Id,
+            side = drawing.Side.ToString(),
+            drawing.EntryPrice,
+            drawing.StopPrice,
+            drawing.TargetPrice,
+            startTime = drawing.HorizontalRange.Start,
+            endTime = drawing.HorizontalRange.End,
+            position.Timeframe,
+            inputs.AccountSize,
+            riskMode = inputs.RiskMode.ToString(),
+            inputs.RiskValue,
+            inputs.Leverage,
+            symbol = BuildSymbolPayload(position.SymbolMetadata),
+            riskReward.RiskPerUnit,
+            riskReward.RewardPerUnit,
+            riskReward.RiskPercent,
+            riskReward.RewardPercent,
+            riskReward.RewardToRiskRatio,
+            sizing.RiskAmount,
+            riskLimitedQuantity = sizing.QuantityByRisk,
+            leverageLimitedQuantity = sizing.QuantityByLeverage,
+            sizing.FinalQuantity,
+            pnl.ProfitPnl,
+            pnl.LossPnl,
+            accountBalanceAfterTp = pnl.ProfitAccountBalance,
+            accountBalanceAfterSl = pnl.StopAccountBalance
+        };
+    }
+
+    private static object BuildSymbolPayload(SymbolMetadata symbol) => new
+    {
+        symbolId = symbol.Symbol,
+        symbol.TickSize,
+        symbol.QuantityStep,
+        symbol.MinimumQuantity,
+        symbol.PointValue,
+        symbol.LotSize,
+        symbol.QuantityPrecision,
+        isAuthoritative = false,
+        notice = "Mock Iran-market profile; not exchange-authoritative"
+    };
+
+    private void SendOperationStatus(string message)
+    {
+        StatusTextBlock.Text = message;
+        PostMessage(new { type = "operationStatus", message });
     }
 
     private void SendBridgeError(string message)
     {
-        StatusTextBlock.Text = $"خطای ورودی نمودار: {message}";
-        PostMessage(new { type = "bridgeError", message });
+        var safeMessage = message.Length <= 500 ? message : message[..500];
+        StatusTextBlock.Text = $"خطای ورودی نمودار: {safeMessage}";
+        PostMessage(new { type = "bridgeError", message = safeMessage });
+    }
+
+    private void ReportClientError(JsonElement root)
+    {
+        var message = RequiredString(root, "message");
+        StatusTextBlock.Text = $"خطای runtime رابط نمودار: {message[..Math.Min(message.Length, 500)]}";
     }
 
     private void PostMessage(object message)
@@ -345,9 +529,17 @@ public partial class MainWindow : Window
         {
             var open = previousClose;
             var drift = (decimal)(Math.Sin(index / 6d) * 210d) + _random.Next(-130, 131);
-            var close = Math.Max(1m, open + decimal.Round(drift, 0));
-            var high = Math.Max(open, close) + _random.Next(40, 181);
-            var low = Math.Max(1m, Math.Min(open, close) - _random.Next(40, 181));
+            var close = NormalizeMockPrice(
+                Math.Max(_mockSymbol.TickSize, open + decimal.Round(drift, 0)));
+            var high = _normalizationAdapter.NormalizePrice(
+                Math.Max(open, close) + _random.Next(40, 181),
+                _mockSymbol,
+                StepRoundingMode.Up);
+            var low = _normalizationAdapter.NormalizePrice(
+                Math.Max(_mockSymbol.TickSize, Math.Min(open, close) - _random.Next(40, 181)),
+                _mockSymbol,
+                StepRoundingMode.Down);
+            low = Math.Max(_mockSymbol.TickSize, low);
             _bars.Add(new MockBar(time.ToUnixTimeSeconds(), open, high, low, close));
             previousClose = close;
             time = time.AddMinutes(1);
@@ -369,7 +561,8 @@ public partial class MainWindow : Window
         {
             _updatesOnCurrentBar = 0;
             var open = last.Close;
-            var close = Math.Max(1m, open + _random.Next(-160, 161));
+            var close = NormalizeMockPrice(
+                Math.Max(_mockSymbol.TickSize, open + _random.Next(-160, 161)));
             updated = new MockBar(
                 last.Time + 60,
                 open,
@@ -380,7 +573,8 @@ public partial class MainWindow : Window
         }
         else
         {
-            var close = Math.Max(1m, last.Close + _random.Next(-90, 91));
+            var close = NormalizeMockPrice(
+                Math.Max(_mockSymbol.TickSize, last.Close + _random.Next(-90, 91)));
             updated = last with
             {
                 High = Math.Max(last.High, close),
@@ -390,11 +584,22 @@ public partial class MainWindow : Window
             _bars[^1] = updated;
         }
 
-        PostMessage(new { type = "barUpdate", bar = updated });
+        _realtimeUpdateCount++;
+        PostMessage(new
+        {
+            type = "barUpdate",
+            bar = updated,
+            updateCount = _realtimeUpdateCount,
+            positionCount = _workspace.Count
+        });
     }
+
+    private decimal NormalizeMockPrice(decimal price) =>
+        _normalizationAdapter.NormalizePrice(price, _mockSymbol, StepRoundingMode.Nearest);
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _shutdown.Cancel();
         _realtimeTimer.Stop();
         _realtimeTimer.Tick -= OnRealtimeTick;
 
@@ -407,6 +612,7 @@ public partial class MainWindow : Window
         }
 
         ChartWebView.Dispose();
+        _shutdown.Dispose();
     }
 
     private static string RequiredString(JsonElement root, string propertyName)
@@ -431,6 +637,16 @@ public partial class MainWindow : Window
         return value;
     }
 
+    private static int RequiredInt(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) || !property.TryGetInt32(out var value))
+        {
+            throw new ArgumentException($"{propertyName} باید عدد صحیح معتبر باشد.");
+        }
+
+        return value;
+    }
+
     private static double RequiredDouble(JsonElement root, string propertyName)
     {
         if (!root.TryGetProperty(propertyName, out var property) ||
@@ -449,6 +665,24 @@ public partial class MainWindow : Window
         return Guid.TryParse(value, out var id) && id != Guid.Empty
             ? id
             : throw new ArgumentException($"{propertyName} شناسه معتبر نیست.");
+    }
+
+    private static Guid? OptionalGuid(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var property) &&
+               property.ValueKind == JsonValueKind.String &&
+               Guid.TryParse(property.GetString(), out var id) &&
+               id != Guid.Empty
+            ? id
+            : null;
+    }
+
+    private static RiskInputMode RequiredRiskMode(JsonElement root, string propertyName)
+    {
+        var value = RequiredString(root, propertyName);
+        return Enum.TryParse<RiskInputMode>(value, ignoreCase: true, out var mode) && Enum.IsDefined(mode)
+            ? mode
+            : throw new ArgumentException("حالت ریسک معتبر نیست.");
     }
 
     private sealed record MockBar(long Time, decimal Open, decimal High, decimal Low, decimal Close);
