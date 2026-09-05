@@ -10,6 +10,8 @@ Dependency boundary:
 - Iran-market rules are provided as symbol metadata; the library does not guess exchange rules.
 - `PositionAnalysisState` is the per-drawing source of truth for levels, risk/sizing inputs, timeframe, and symbol metadata. Derived metrics are calculated on demand and are never persisted.
 - `PositionWorkspace` keeps multiple positions isolated by `Guid` and validates transactional replacement during load.
-- `PositionDocumentSerializer` currently writes schema version `1`, rejects unknown fields/versions and duplicate ids, and caps input documents at 1 MiB.
+- `PositionSelectionState` makes selection-sensitive edit/delete requests fail closed when a stale position id is supplied.
+- `PositionDocumentSerializer` currently writes schema version `1`, rejects unknown fields/versions and duplicate ids, and caps both input and generated documents at 1 MiB.
+- Horizontal ranges are source-of-truth time coordinates. Resize operations preserve all prices and enforce a caller-supplied minimum width; rendered pixels are never persisted.
 
 `TRADINGVIEW_REFERENCE.md` records the verified formulas, unresolved behavior, and explicit PoC decisions. Chart-host-specific pointer wiring and local file I/O remain outside this library.

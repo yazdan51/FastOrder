@@ -72,6 +72,18 @@ output {
     box-shadow: 0 0 0 1px #3b9cff inset;
 }
 
+.tool-button.long[aria-pressed="true"] {
+    border-color: #26a69a;
+    background: #123f3d;
+    box-shadow: 0 0 0 1px #26a69a inset;
+}
+
+.tool-button.short[aria-pressed="true"] {
+    border-color: #ef5350;
+    background: #48242a;
+    box-shadow: 0 0 0 1px #ef5350 inset;
+}
+
 .tool-button.danger {
     margin-top: auto;
 }
@@ -203,6 +215,14 @@ output {
     font-size: 11px;
 }
 
+.properties-panel[data-side="Long"] #selected-position-side {
+    color: #63d6c8;
+}
+
+.properties-panel[data-side="Short"] #selected-position-side {
+    color: #ff8c98;
+}
+
 .local-badge {
     padding: 3px 6px;
     border: 1px solid #315d80;
@@ -279,6 +299,11 @@ output {
 
 .position-form input:invalid {
     border-color: #a14a54;
+}
+
+.position-form [aria-invalid="true"] {
+    border-color: #ef5350;
+    box-shadow: 0 0 0 1px #ef5350 inset;
 }
 
 .metrics-grid {

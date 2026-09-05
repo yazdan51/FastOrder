@@ -11,11 +11,11 @@
 <body>
     <main class="workspace">
         <aside class="toolbar" aria-label="ابزارهای تحلیل موقعیت">
-            <button id="long-tool" class="tool-button" type="button" aria-pressed="false" title="موقعیت خرید (L)">
+            <button id="long-tool" class="tool-button long" type="button" aria-pressed="false" title="موقعیت خرید (L)">
                 <span aria-hidden="true">↗</span>
                 <span>Long</span>
             </button>
-            <button id="short-tool" class="tool-button" type="button" aria-pressed="false" title="موقعیت فروش (S)">
+            <button id="short-tool" class="tool-button short" type="button" aria-pressed="false" title="موقعیت فروش (S)">
                 <span aria-hidden="true">↘</span>
                 <span>Short</span>
             </button>
@@ -48,7 +48,7 @@
                 <canvas id="drawing-overlay" aria-hidden="true"></canvas>
             </div>
             <footer class="chart-footer">
-                <span>Wheel: zoom · Drag empty chart: pan · Delete: remove selected</span>
+                <span>Wheel: zoom · Drag empty chart: pan · Edge handles: width · Esc: cancel · Delete: selected only</span>
                 <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a>
             </footer>
         </section>
@@ -57,7 +57,7 @@
             <header class="properties-header">
                 <div>
                     <h1>Position Properties</h1>
-                    <span id="selected-position-side">No selection</span>
+                    <span id="selected-position-side" aria-live="polite">No selection</span>
                 </div>
                 <span class="local-badge">C# authoritative</span>
             </header>
@@ -71,19 +71,19 @@
                     <legend>Inputs</legend>
                     <label>
                         <span>Entry Price</span>
-                        <input id="entry-price" data-field="entryPrice" type="number" min="0" step="any" inputmode="decimal">
+                        <input id="entry-price" data-field="entryPrice" type="number" min="0.00000001" step="any" inputmode="decimal" required>
                     </label>
                     <label>
                         <span>Stop Price</span>
-                        <input id="stop-price" data-field="stopPrice" type="number" min="0" step="any" inputmode="decimal">
+                        <input id="stop-price" data-field="stopPrice" type="number" min="0.00000001" step="any" inputmode="decimal" required>
                     </label>
                     <label>
                         <span>Target / Profit Price</span>
-                        <input id="target-price" data-field="targetPrice" type="number" min="0" step="any" inputmode="decimal">
+                        <input id="target-price" data-field="targetPrice" type="number" min="0.00000001" step="any" inputmode="decimal" required>
                     </label>
                     <label>
                         <span>Account Size</span>
-                        <input id="account-size" data-field="accountSize" type="number" min="0" step="any" inputmode="decimal">
+                        <input id="account-size" data-field="accountSize" type="number" min="0.00000001" step="any" inputmode="decimal" required>
                     </label>
                     <label>
                         <span>Risk Mode</span>
@@ -94,23 +94,23 @@
                     </label>
                     <label>
                         <span>Risk Value</span>
-                        <input id="risk-value" data-field="riskValue" type="number" min="0" step="any" inputmode="decimal">
+                        <input id="risk-value" data-field="riskValue" type="number" min="0.00000001" step="any" inputmode="decimal" required>
                     </label>
                     <label>
                         <span>Lot Size</span>
-                        <input id="lot-size" data-field="lotSize" type="number" min="0" step="any" inputmode="decimal">
+                        <input id="lot-size" data-field="lotSize" type="number" min="0.00000001" step="any" inputmode="decimal" required>
                     </label>
                     <label>
                         <span>Point Value</span>
-                        <input id="point-value" data-field="pointValue" type="number" min="0" step="any" inputmode="decimal">
+                        <input id="point-value" data-field="pointValue" type="number" min="0.00000001" step="any" inputmode="decimal" required>
                     </label>
                     <label>
                         <span>Leverage</span>
-                        <input id="leverage" data-field="leverage" type="number" min="0" step="any" inputmode="decimal">
+                        <input id="leverage" data-field="leverage" type="number" min="0.00000001" step="any" inputmode="decimal" required>
                     </label>
                     <label>
                         <span>Quantity Precision</span>
-                        <input id="quantity-precision" data-field="quantityPrecision" type="number" min="0" max="28" step="1" inputmode="numeric">
+                        <input id="quantity-precision" data-field="quantityPrecision" type="number" min="0" max="28" step="1" inputmode="numeric" required>
                     </label>
                 </fieldset>
 
@@ -145,6 +145,7 @@
     </main>
 
     <script src="vendor/lightweight-charts.standalone.production.js"></script>
+    <script src="position-interaction.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

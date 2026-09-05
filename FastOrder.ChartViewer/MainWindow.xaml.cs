@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private const string LocalHostName = "chartviewer.local";
     private const string MockTimeframe = "1m";
     private const int MaximumIncomingMessageLength = 16_384;
+    private const double MinimumHorizontalRangeSeconds = 60d;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -25,6 +26,7 @@ public partial class MainWindow : Window
     };
 
     private readonly PositionWorkspace _workspace = new();
+    private readonly PositionSelectionState _selection = new();
     private readonly IranMarketNormalizationAdapter _normalizationAdapter = new();
     private readonly SymbolMetadata _mockSymbol = new(
         "IR_DEMO_MOCK",
@@ -169,8 +171,14 @@ public partial class MainWindow : Window
                 case "createPosition":
                     CreatePosition(root);
                     break;
+                case "selectPosition":
+                    SelectPosition(root);
+                    break;
                 case "updatePosition":
                     UpdatePosition(root);
+                    break;
+                case "resizePosition":
+                    ResizePosition(root);
                     break;
                 case "movePosition":
                     MovePosition(root);
@@ -259,13 +267,20 @@ public partial class MainWindow : Window
             _mockSymbol);
 
         _workspace.Add(position);
+        _selection.Select(_workspace, position.Id);
         SendPosition(position);
+    }
+
+    private void SelectPosition(JsonElement root)
+    {
+        var id = NullableGuid(root, "id");
+        _selection.Select(_workspace, id);
+        SendSelection();
     }
 
     private void UpdatePosition(JsonElement root)
     {
-        var id = RequiredGuid(root, "id");
-        var position = _workspace.GetRequired(id);
+        var position = GetSelectedPosition(root);
 
         var handleText = RequiredString(root, "handle");
         if (!Enum.TryParse<PositionHandle>(handleText, ignoreCase: true, out var handle) ||
@@ -292,8 +307,7 @@ public partial class MainWindow : Window
 
     private void MovePosition(JsonElement root)
     {
-        var id = RequiredGuid(root, "id");
-        var position = _workspace.GetRequired(id);
+        var position = GetSelectedPosition(root);
         var drawing = position.Drawing;
         var symbol = position.SymbolMetadata;
 
@@ -319,10 +333,30 @@ public partial class MainWindow : Window
         SendPosition(updated);
     }
 
+    private void ResizePosition(JsonElement root)
+    {
+        var position = GetSelectedPosition(root);
+        var handleText = RequiredString(root, "handle");
+        if (!Enum.TryParse<PositionHandle>(handleText, ignoreCase: true, out var handle) ||
+            handle is not (PositionHandle.StartEdge or PositionHandle.EndEdge))
+        {
+            throw new ArgumentException("Handle افقی معتبر نیست.");
+        }
+
+        var drawing = PositionDrawingEditor.ResizeHorizontalClamped(
+            position.Drawing,
+            handle,
+            RequiredDouble(root, "proposedTime"),
+            MinimumHorizontalRangeSeconds);
+        var updated = position.WithDrawing(drawing);
+
+        _workspace.Update(updated);
+        SendPosition(updated);
+    }
+
     private void EditPosition(JsonElement root)
     {
-        var id = RequiredGuid(root, "id");
-        var position = _workspace.GetRequired(id);
+        var position = GetSelectedPosition(root);
         var field = RequiredString(root, "field");
 
         var updated = field switch
@@ -381,9 +415,9 @@ public partial class MainWindow : Window
     private void DeletePosition(JsonElement root)
     {
         var id = RequiredGuid(root, "id");
-        if (_workspace.Remove(id))
+        if (_selection.RemoveSelected(_workspace, id))
         {
-            PostMessage(new { type = "positionDeleted", id });
+            PostMessage(new { type = "positionDeleted", id, selectedId = _selection.SelectedId });
         }
     }
 
@@ -407,20 +441,20 @@ public partial class MainWindow : Window
         await _persistenceGate.WaitAsync(cancellationToken);
         try
         {
+            var savedFileExists = _positionStore.Exists;
             var positions = await _positionStore.LoadAsync(cancellationToken);
-            if (positions is null)
-            {
-                SendOperationStatus("هنوز فایل ذخیره‌شده‌ای وجود ندارد.");
-                return;
-            }
 
             _workspace.ReplaceAll(positions);
+            _selection.Reconcile(_workspace);
             PostMessage(new
             {
                 type = "positionsReplaced",
-                positions = _workspace.Positions.Select(BuildPositionPayload).ToArray()
+                positions = _workspace.Positions.Select(BuildPositionPayload).ToArray(),
+                selectedId = _selection.SelectedId
             });
-            SendOperationStatus($"{_workspace.Count} Position از فایل محلی بارگذاری شد.");
+            SendOperationStatus(savedFileExists
+                ? $"{_workspace.Count} Position از فایل محلی بارگذاری شد."
+                : "فایل ذخیره‌شده‌ای وجود نداشت؛ workspace خالی بارگذاری شد.");
         }
         finally
         {
@@ -433,8 +467,20 @@ public partial class MainWindow : Window
         PostMessage(new
         {
             type = "positionState",
-            position = BuildPositionPayload(position)
+            position = BuildPositionPayload(position),
+            selectedId = _selection.SelectedId
         });
+    }
+
+    private void SendSelection()
+    {
+        PostMessage(new { type = "selectionChanged", selectedId = _selection.SelectedId });
+    }
+
+    private PositionAnalysisState GetSelectedPosition(JsonElement root)
+    {
+        var id = RequiredGuid(root, "id");
+        return _selection.GetSelectedRequired(_workspace, id);
     }
 
     private object BuildPositionPayload(PositionAnalysisState position)
@@ -675,6 +721,24 @@ public partial class MainWindow : Window
                id != Guid.Empty
             ? id
             : null;
+    }
+
+    private static Guid? NullableGuid(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (property.ValueKind == JsonValueKind.String &&
+            Guid.TryParse(property.GetString(), out var id) &&
+            id != Guid.Empty)
+        {
+            return id;
+        }
+
+        throw new ArgumentException($"{propertyName} شناسه معتبر نیست.");
     }
 
     private static RiskInputMode RequiredRiskMode(JsonElement root, string propertyName)

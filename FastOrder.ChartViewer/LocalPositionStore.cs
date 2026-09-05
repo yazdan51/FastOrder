@@ -7,6 +7,7 @@ namespace FastOrder.ChartViewer;
 
 internal sealed class LocalPositionStore
 {
+    private const long MaximumDocumentByteLength = PositionDocumentSerializer.MaximumDocumentLength * 4L;
     private readonly string _filePath;
 
     public LocalPositionStore(string? rootPath = null)
@@ -15,10 +16,17 @@ internal sealed class LocalPositionStore
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "FastOrder",
             "ChartViewer");
-        _filePath = Path.Combine(storageRoot, "positions.v1.json");
+        if (string.IsNullOrWhiteSpace(storageRoot))
+        {
+            throw new ArgumentException("A local position storage root is required.", nameof(rootPath));
+        }
+
+        _filePath = Path.Combine(Path.GetFullPath(storageRoot), "positions.v1.json");
     }
 
     public string FilePath => _filePath;
+
+    public bool Exists => File.Exists(_filePath);
 
     public async Task SaveAsync(
         IEnumerable<PositionAnalysisState> positions,
@@ -39,7 +47,14 @@ internal sealed class LocalPositionStore
                 json,
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                 cancellationToken);
-            File.Move(temporaryPath, _filePath, overwrite: true);
+            if (File.Exists(_filePath))
+            {
+                File.Replace(temporaryPath, _filePath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(temporaryPath, _filePath);
+            }
         }
         finally
         {
@@ -50,16 +65,16 @@ internal sealed class LocalPositionStore
         }
     }
 
-    public async Task<IReadOnlyList<PositionAnalysisState>?> LoadAsync(
+    public async Task<IReadOnlyList<PositionAnalysisState>> LoadAsync(
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(_filePath))
         {
-            return null;
+            return [];
         }
 
         var fileInfo = new FileInfo(_filePath);
-        if (fileInfo.Length > PositionDocumentSerializer.MaximumDocumentLength * 4L)
+        if (fileInfo.Length > MaximumDocumentByteLength)
         {
             throw new InvalidDataException("The saved position document is too large.");
         }

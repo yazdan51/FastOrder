@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\FastOrder.ChartTools\FastOrder.ChartTools.csproj" />
+    <ProjectReference Include="..\FastOrder.ChartViewer\FastOrder.ChartViewer.csproj" />
   </ItemGroup>
 
 </Project>

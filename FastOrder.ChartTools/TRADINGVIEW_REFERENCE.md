@@ -61,4 +61,16 @@ These behaviors are not represented as TradingView defaults:
 - Each position snapshots its own sizing inputs and mock symbol metadata so edits cannot affect another drawing.
 - JSON schema version `1` persists ids, symbol/timeframe, direction, price/time anchors, sizing inputs, and normalization metadata; derived metrics are omitted and recalculated.
 
+## ChartViewer UX decisions
+
+These interaction choices are local product decisions and are not claimed as undocumented TradingView behavior:
+
+- The selected drawing is rendered last with a stronger outline; only it exposes draggable price and horizontal-range handles.
+- A first click on an unselected drawing selects it without moving it. A selected line, body, or handle begins the corresponding interaction.
+- Empty-chart pointer input deselects without blocking Lightweight Charts pan/zoom behavior.
+- Horizontal edge dragging changes only persisted time anchors and preserves Entry, Stop, and Target prices.
+- Labels for the selected drawing are spaced and clamped to the visible chart. Non-selected drawings use a compact side/entry badge to reduce overlap.
+- `Escape` stops the active interaction at its latest C#-validated state; it does not implement an undo transaction.
+- Schema version `1` is strict. Future changes require an explicit version bump and tested migration; silent best-effort migration is intentionally unsupported.
+
 Iran-market metadata is deliberately supplied by the caller. The ChartViewer demo uses a visible `IR_DEMO_MOCK` profile only to demonstrate tick normalization and quantity floor-to-step behavior. It is non-authoritative and does not claim actual exchange or symbol rules. The adapter does not hardcode exchange rules because tick size, quantity step, and other symbol rules can vary and must come from a verified market-data source.

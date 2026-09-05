@@ -182,6 +182,64 @@ public sealed class MarketAndInteractionTests
     }
 
     [TestMethod]
+    public void Editor_ResizeHorizontalEdgesPreservesPricesAndClampsMinimumWidth()
+    {
+        var drawing = PositionDrawing.Create(
+            PositionSide.Long,
+            100m,
+            120m,
+            80m,
+            new ChartHorizontalRange(100, 200));
+
+        var startClamped = PositionDrawingEditor.ResizeHorizontalClamped(
+            drawing,
+            PositionHandle.StartEdge,
+            horizontalValue: 195,
+            minimumWidth: 20);
+        var endClamped = PositionDrawingEditor.ResizeHorizontalClamped(
+            drawing,
+            PositionHandle.EndEdge,
+            horizontalValue: 105,
+            minimumWidth: 20);
+
+        Assert.AreEqual(180d, startClamped.HorizontalRange.Start);
+        Assert.AreEqual(200d, startClamped.HorizontalRange.End);
+        Assert.AreEqual(100d, endClamped.HorizontalRange.Start);
+        Assert.AreEqual(120d, endClamped.HorizontalRange.End);
+        Assert.AreEqual(drawing.EntryPrice, startClamped.EntryPrice);
+        Assert.AreEqual(drawing.TargetPrice, startClamped.TargetPrice);
+        Assert.AreEqual(drawing.StopPrice, endClamped.StopPrice);
+    }
+
+    [TestMethod]
+    public void Editor_SequentialLongAndShortEditsNeverCreateInvalidOrdering()
+    {
+        var drawings = new[]
+        {
+            PositionDrawing.Create(PositionSide.Long, 100m, 120m, 80m, new ChartHorizontalRange(1, 2)),
+            PositionDrawing.Create(PositionSide.Short, 100m, 80m, 120m, new ChartHorizontalRange(1, 2))
+        };
+
+        foreach (var original in drawings)
+        {
+            var edited = original;
+            foreach (var handle in new[] { PositionHandle.Entry, PositionHandle.Stop, PositionHandle.Target })
+            {
+                edited = PositionDrawingEditor.UpdatePriceClamped(edited, handle, 1m, 5m);
+                edited = PositionDrawingEditor.UpdatePriceClamped(edited, handle, 1_000m, 5m);
+            }
+
+            _ = new PositionDrawing(
+                edited.Id,
+                edited.Side,
+                edited.EntryPrice,
+                edited.TargetPrice,
+                edited.StopPrice,
+                edited.HorizontalRange);
+        }
+    }
+
+    [TestMethod]
     public void GeometryMapper_RecomputesPixelsFromStablePriceAndTimeAnchors()
     {
         var drawing = PositionDrawing.Create(

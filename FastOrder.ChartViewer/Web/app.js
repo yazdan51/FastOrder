@@ -13,6 +13,7 @@
     const symbolName = document.getElementById("symbol-name");
     const realtimeStatus = document.getElementById("realtime-status");
     const positionForm = document.getElementById("position-form");
+    const propertiesPanel = document.getElementById("properties-panel");
     const noSelection = document.getElementById("no-selection");
     const selectedPositionSide = document.getElementById("selected-position-side");
     const propertyInputs = new Map(
@@ -44,8 +45,10 @@
     let pendingDragMessage = null;
     let dragFrame = null;
 
-    if (!window.LightweightCharts) {
-        setStatus("کتابخانه نمودار محلی بارگذاری نشد.", true);
+    const interaction = window.FastOrderPositionInteraction;
+
+    if (!window.LightweightCharts || !interaction) {
+        setStatus("کتابخانه‌های محلی نمودار/تعامل بارگذاری نشدند.", true);
         return;
     }
 
@@ -152,12 +155,20 @@
         setStatus(activeTool ? `روی نمودار برای ساخت ${activeTool} کلیک کنید.` : "یک ابزار را انتخاب کنید.");
     }
 
-    function selectPosition(id) {
-        selectedId = id;
-        deleteButton.disabled = !id;
-        if (id && positions.has(id)) {
-            const side = positions.get(id).side;
-            setStatus(`${side} Position انتخاب شد.`);
+    function selectPosition(id, options = {}) {
+        const { notifyHost = true, announce = true } = options;
+        const resolvedId = id && positions.has(id) ? id : null;
+        const changed = selectedId !== resolvedId;
+        selectedId = resolvedId;
+        deleteButton.disabled = !selectedId;
+
+        const selectedPosition = selectedId ? positions.get(selectedId) : null;
+        propertiesPanel.dataset.side = selectedPosition?.side ?? "";
+        if (announce && selectedPosition) {
+            setStatus(`${selectedPosition.side} Position انتخاب شد.`);
+        }
+        if (notifyHost && changed) {
+            postMessage({ type: "selectPosition", id: selectedId });
         }
         renderProperties();
         renderDrawings();
@@ -197,6 +208,7 @@
             const input = propertyInputs.get(field);
             if (input) {
                 input.value = String(value);
+                input.removeAttribute("aria-invalid");
             }
         }
 
@@ -223,14 +235,13 @@
     }
 
     function submitPropertyEdit(input) {
-        if (!selectedId || !positions.has(selectedId) || !input.checkValidity()) {
-            setStatus("مقدار ورودی معتبر نیست.", true);
-            return;
-        }
-
         const field = input.dataset.field;
         const value = input instanceof HTMLSelectElement ? input.value : Number(input.value);
-        if (!field || (typeof value === "number" && !Number.isFinite(value))) {
+        const validValue = interaction.isValidPropertyValue(field, value);
+
+        if (!selectedId || !positions.has(selectedId) || !field || !input.checkValidity() || !validValue) {
+            renderProperties();
+            input.setAttribute("aria-invalid", "true");
             setStatus("مقدار ورودی معتبر نیست.", true);
             return;
         }
@@ -244,26 +255,7 @@
     }
 
     function nearestBarIndex(time) {
-        if (!barTimes.length || typeof time !== "number") {
-            return -1;
-        }
-
-        let low = 0;
-        let high = barTimes.length - 1;
-        while (low < high) {
-            const middle = Math.floor((low + high) / 2);
-            if (barTimes[middle] < time) {
-                low = middle + 1;
-            } else {
-                high = middle;
-            }
-        }
-
-        if (low > 0 && Math.abs(barTimes[low - 1] - time) <= Math.abs(barTimes[low] - time)) {
-            return low - 1;
-        }
-
-        return low;
+        return interaction.nearestBarIndex(barTimes, time);
     }
 
     function eventPoint(event) {
@@ -324,7 +316,11 @@
         context.clearRect(0, 0, width, height);
         geometries.clear();
 
-        for (const position of positions.values()) {
+        const orderedPositions = [
+            ...Array.from(positions.values()).filter(position => position.id !== selectedId),
+            ...Array.from(positions.values()).filter(position => position.id === selectedId)
+        ];
+        for (const position of orderedPositions) {
             const geometry = geometryFor(position);
             if (!geometry) {
                 continue;
@@ -343,51 +339,70 @@
         const riskHeight = Math.abs(stopY - entryY);
         const width = rightX - leftX;
 
-        context.fillStyle = "rgba(38, 166, 154, 0.22)";
+        context.save();
+        context.globalAlpha = selected ? 1 : 0.62;
+        context.fillStyle = selected ? "rgba(38, 166, 154, 0.25)" : "rgba(38, 166, 154, 0.16)";
         context.fillRect(leftX, rewardTop, width, rewardHeight);
-        context.fillStyle = "rgba(239, 83, 80, 0.22)";
+        context.fillStyle = selected ? "rgba(239, 83, 80, 0.25)" : "rgba(239, 83, 80, 0.16)";
         context.fillRect(leftX, riskTop, width, riskHeight);
 
-        drawLevel(leftX, rightX, targetY, "#26a69a", false);
-        drawLevel(leftX, rightX, entryY, "#e7edf5", true);
-        drawLevel(leftX, rightX, stopY, "#ef5350", false);
+        drawLevel(leftX, rightX, targetY, "#26a69a", false, selected);
+        drawLevel(leftX, rightX, entryY, "#e7edf5", true, selected);
+        drawLevel(leftX, rightX, stopY, "#ef5350", false, selected);
 
+        context.save();
         context.strokeStyle = selected ? "#5ab0ff" : "rgba(171, 190, 209, 0.65)";
-        context.lineWidth = selected ? 1.5 : 1;
+        context.lineWidth = selected ? 2 : 1;
+        if (selected) {
+            context.shadowColor = "rgba(90, 176, 255, 0.72)";
+            context.shadowBlur = 8;
+        }
         context.strokeRect(leftX, geometry.topY, width, geometry.bottomY - geometry.topY);
+        context.restore();
 
         const priceDigits = inferPriceDigits(position.symbol.tickSize);
         const quantityDigits = Number(position.symbol.quantityPrecision);
-        drawLabel(
-            rightX,
-            targetY,
-            `TP ${formatNumber(position.targetPrice, priceDigits)}  +${formatNumber(position.rewardPercent, 2)}%  PnL ${formatNumber(position.profitPnl, 2)}`,
-            "#126a61");
-        drawLabel(
-            rightX,
-            entryY,
-            `Entry ${formatNumber(position.entryPrice, priceDigits)}  Qty ${formatNumber(position.finalQuantity, quantityDigits)}  R:R ${formatNumber(position.rewardToRiskRatio, 2)}`,
-            "#35475a");
-        drawLabel(
-            rightX,
-            stopY,
-            `SL ${formatNumber(position.stopPrice, priceDigits)}  -${formatNumber(position.riskPercent, 2)}%  PnL ${formatNumber(position.lossPnl, 2)}`,
-            "#862f3a");
+        drawSideBadge(position, geometry, priceDigits, selected);
 
         if (selected) {
+            const labelTops = interaction.layoutLabelTops(
+                [targetY, entryY, stopY],
+                host.clientHeight,
+                22,
+                3);
+            drawLabel(
+                rightX,
+                labelTops[0],
+                `TP ${formatNumber(position.targetPrice, priceDigits)}  +${formatNumber(position.rewardPercent, 2)}%  PnL ${formatNumber(position.profitPnl, 2)}`,
+                "#126a61");
+            drawLabel(
+                rightX,
+                labelTops[1],
+                `Entry ${formatNumber(position.entryPrice, priceDigits)}  Qty ${formatNumber(position.finalQuantity, quantityDigits)}  R:R ${formatNumber(position.rewardToRiskRatio, 2)}`,
+                "#35475a");
+            drawLabel(
+                rightX,
+                labelTops[2],
+                `SL ${formatNumber(position.stopPrice, priceDigits)}  -${formatNumber(position.riskPercent, 2)}%  PnL ${formatNumber(position.lossPnl, 2)}`,
+                "#862f3a");
             drawHandle(leftX, targetY, "#26a69a");
             drawHandle(leftX, entryY, "#e7edf5");
             drawHandle(leftX, stopY, "#ef5350");
+            const middleY = (geometry.topY + geometry.bottomY) / 2;
+            drawRangeHandle(leftX, middleY);
+            drawRangeHandle(rightX, middleY);
         }
+
+        context.restore();
     }
 
-    function drawLevel(leftX, rightX, y, color, dashed) {
+    function drawLevel(leftX, rightX, y, color, dashed, selected) {
         context.beginPath();
         context.setLineDash(dashed ? [6, 4] : []);
         context.moveTo(leftX, y);
         context.lineTo(rightX, y);
         context.strokeStyle = color;
-        context.lineWidth = 1.25;
+        context.lineWidth = selected ? 1.6 : 1.1;
         context.stroke();
         context.setLineDash([]);
     }
@@ -402,13 +417,34 @@
         context.stroke();
     }
 
-    function drawLabel(rightX, y, text, background) {
+    function drawRangeHandle(x, y) {
+        context.fillStyle = "#101722";
+        context.fillRect(x - 5, y - 8, 10, 16);
+        context.strokeStyle = "#5ab0ff";
+        context.lineWidth = 2;
+        context.strokeRect(x - 5, y - 8, 10, 16);
+    }
+
+    function drawSideBadge(position, geometry, priceDigits, selected) {
+        const label = `${position.side.toUpperCase()}  ${formatNumber(position.entryPrice, priceDigits)}`;
+        context.font = `${selected ? "600" : "500"} 11px Segoe UI, sans-serif`;
+        const width = context.measureText(label).width + 12;
+        const height = 19;
+        const x = Math.max(2, Math.min(host.clientWidth - width - 2, geometry.leftX + 7));
+        const y = Math.max(2, Math.min(host.clientHeight - height - 2, geometry.topY + 7));
+        context.fillStyle = position.side === "Long" ? "#126a61" : "#862f3a";
+        context.fillRect(x, y, width, height);
+        context.fillStyle = "#ffffff";
+        context.textBaseline = "middle";
+        context.fillText(label, x + 6, y + height / 2);
+    }
+
+    function drawLabel(rightX, top, text, background) {
         context.font = "12px Segoe UI, sans-serif";
         const paddingX = 7;
         const labelWidth = context.measureText(text).width + paddingX * 2;
         const labelHeight = 22;
         const x = Math.min(rightX + 5, Math.max(0, host.clientWidth - labelWidth - 84));
-        const top = Math.max(0, Math.min(host.clientHeight - labelHeight, y - labelHeight / 2));
         context.fillStyle = background;
         context.fillRect(x, top, labelWidth, labelHeight);
         context.fillStyle = "#ffffff";
@@ -436,33 +472,7 @@
     }
 
     function hitTest(point) {
-        const entries = Array.from(positions.values()).reverse();
-        for (const position of entries) {
-            const geometry = geometries.get(position.id);
-            if (!geometry) {
-                continue;
-            }
-
-            const insideX = point.x >= geometry.leftX - 7 && point.x <= geometry.rightX + 7;
-            if (insideX) {
-                if (Math.abs(point.y - geometry.targetY) <= 7) {
-                    return { id: position.id, kind: "handle", handle: "Target" };
-                }
-                if (Math.abs(point.y - geometry.entryY) <= 7) {
-                    return { id: position.id, kind: "handle", handle: "Entry" };
-                }
-                if (Math.abs(point.y - geometry.stopY) <= 7) {
-                    return { id: position.id, kind: "handle", handle: "Stop" };
-                }
-            }
-
-            if (point.x >= geometry.leftX && point.x <= geometry.rightX &&
-                point.y >= geometry.topY && point.y <= geometry.bottomY) {
-                return { id: position.id, kind: "body" };
-            }
-        }
-
-        return null;
+        return interaction.hitTest(Array.from(positions.values()), geometries, selectedId, point);
     }
 
     function queueDragMessage(message) {
@@ -478,6 +488,29 @@
                 pendingDragMessage = null;
             }
         });
+    }
+
+    function flushPendingDragMessage() {
+        if (dragFrame !== null) {
+            cancelAnimationFrame(dragFrame);
+            dragFrame = null;
+        }
+        if (pendingDragMessage) {
+            postMessage(pendingDragMessage);
+            pendingDragMessage = null;
+        }
+    }
+
+    function discardPendingDragMessage() {
+        if (dragFrame !== null) {
+            cancelAnimationFrame(dragFrame);
+            dragFrame = null;
+        }
+        pendingDragMessage = null;
+    }
+
+    function updateHoverCursor(point) {
+        host.style.cursor = interaction.cursorForHit(hitTest(point), activeTool);
     }
 
     host.addEventListener("pointerdown", event => {
@@ -499,11 +532,18 @@
             return;
         }
 
+        if (hit.kind === "select") {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            selectPosition(hit.id);
+            return;
+        }
+
         const position = positions.get(hit.id);
-        const pointerPrice = chartCoordinateMapper.yToPrice(point.y);
         const pointerTime = chartCoordinateMapper.xToHorizontalValue(point.x);
         const pointerIndex = nearestBarIndex(pointerTime);
-        if (pointerPrice === null || pointerIndex < 0) {
+        const pointerPrice = chartCoordinateMapper.yToPrice(point.y);
+        if (pointerIndex < 0 || (hit.kind !== "range-handle" && pointerPrice === null)) {
             return;
         }
 
@@ -514,29 +554,53 @@
         dragState = {
             pointerId: event.pointerId,
             hit,
-            pointerPrice,
+            pointerPrice: pointerPrice ?? position.entryPrice,
             pointerIndex,
             entryPrice: position.entryPrice,
             startIndex: nearestBarIndex(position.startTime),
             endIndex: nearestBarIndex(position.endTime)
         };
-        host.style.cursor = hit.kind === "body" ? "move" : "ns-resize";
+        host.style.cursor = interaction.cursorForHit(hit, activeTool);
     }, true);
 
     host.addEventListener("pointermove", event => {
         if (!dragState || dragState.pointerId !== event.pointerId) {
+            updateHoverCursor(eventPoint(event));
             return;
         }
 
         event.preventDefault();
         event.stopImmediatePropagation();
         const point = eventPoint(event);
+
+        if (dragState.hit.kind === "range-handle") {
+            const currentTime = chartCoordinateMapper.xToHorizontalValue(point.x);
+            const currentIndex = nearestBarIndex(currentTime);
+            if (currentIndex < 0) {
+                return;
+            }
+
+            const resizedIndex = interaction.clampResizeIndex(
+                dragState.hit.handle,
+                currentIndex,
+                dragState.startIndex,
+                dragState.endIndex,
+                barTimes.length);
+            queueDragMessage({
+                type: "resizePosition",
+                id: dragState.hit.id,
+                handle: dragState.hit.handle,
+                proposedTime: barTimes[resizedIndex]
+            });
+            return;
+        }
+
         const price = chartCoordinateMapper.yToPrice(point.y);
         if (price === null) {
             return;
         }
 
-        if (dragState.hit.kind === "handle") {
+        if (dragState.hit.kind === "price-handle") {
             queueDragMessage({
                 type: "updatePosition",
                 id: dragState.hit.id,
@@ -552,10 +616,12 @@
             return;
         }
 
-        const requestedDelta = currentIndex - dragState.pointerIndex;
-        const minimumDelta = -dragState.startIndex;
-        const maximumDelta = barTimes.length - 1 - dragState.endIndex;
-        const barDelta = Math.max(minimumDelta, Math.min(maximumDelta, requestedDelta));
+        const barDelta = interaction.clampMoveDelta(
+            dragState.pointerIndex,
+            currentIndex,
+            dragState.startIndex,
+            dragState.endIndex,
+            barTimes.length);
         queueDragMessage({
             type: "movePosition",
             id: dragState.hit.id,
@@ -571,15 +637,36 @@
 
         event.preventDefault();
         event.stopImmediatePropagation();
+        flushPendingDragMessage();
         if (host.hasPointerCapture(event.pointerId)) {
             host.releasePointerCapture(event.pointerId);
         }
         dragState = null;
+        updateHoverCursor(eventPoint(event));
+    }
+
+    function cancelActiveDrag() {
+        if (!dragState) {
+            return false;
+        }
+
+        discardPendingDragMessage();
+        if (host.hasPointerCapture(dragState.pointerId)) {
+            host.releasePointerCapture(dragState.pointerId);
+        }
+        dragState = null;
         host.style.cursor = activeTool ? "crosshair" : "default";
+        setStatus("تعامل فعال متوقف شد؛ آخرین مقدار معتبر حفظ شد.");
+        return true;
     }
 
     host.addEventListener("pointerup", endDrag, true);
     host.addEventListener("pointercancel", endDrag, true);
+    host.addEventListener("pointerleave", event => {
+        if (!dragState) {
+            updateHoverCursor(eventPoint(event));
+        }
+    }, true);
 
     longButton.addEventListener("click", () => setActiveTool("Long"));
     shortButton.addEventListener("click", () => setActiveTool("Short"));
@@ -592,12 +679,28 @@
             submitPropertyEdit(input);
         }
     });
+    positionForm.addEventListener("input", event => {
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+            event.target.removeAttribute("aria-invalid");
+        }
+    });
 
     document.addEventListener("keydown", event => {
-        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+        const target = event.target;
+        const isPropertiesControl = target instanceof Element && Boolean(target.closest("#properties-panel"));
+        if (isPropertiesControl) {
             if (event.key === "Escape") {
-                event.target.blur();
+                event.preventDefault();
+                event.stopPropagation();
+                renderProperties();
+                if (target instanceof HTMLElement) {
+                    target.blur();
+                }
             }
+            return;
+        }
+
+        if (event.ctrlKey || event.altKey || event.metaKey) {
             return;
         }
 
@@ -605,7 +708,9 @@
             event.preventDefault();
             deleteSelected();
         } else if (event.key === "Escape") {
-            if (activeTool) {
+            if (cancelActiveDrag()) {
+                event.preventDefault();
+            } else if (activeTool) {
                 setActiveTool(null);
             } else {
                 selectPosition(null);
@@ -652,28 +757,23 @@
                 break;
             case "positionState":
                 positions.set(message.position.id, message.position);
-                selectPosition(message.position.id);
+                selectPosition(message.selectedId, { notifyHost: false, announce: false });
                 break;
             case "positionsReplaced": {
-                const previousSelection = selectedId;
                 positions.clear();
                 for (const position of message.positions) {
                     positions.set(position.id, position);
                 }
-                const replacementSelection = positions.has(previousSelection)
-                    ? previousSelection
-                    : positions.keys().next().value ?? null;
-                selectPosition(replacementSelection);
+                selectPosition(message.selectedId, { notifyHost: false, announce: false });
                 break;
             }
             case "positionDeleted":
                 positions.delete(message.id);
-                if (selectedId === message.id) {
-                    selectPosition(null);
-                } else {
-                    renderDrawings();
-                }
+                selectPosition(message.selectedId, { notifyHost: false, announce: false });
                 setStatus("Position حذف شد.");
+                break;
+            case "selectionChanged":
+                selectPosition(message.selectedId, { notifyHost: false, announce: false });
                 break;
             case "barUpdate":
                 candleSeries.update(message.bar);

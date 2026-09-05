@@ -44,7 +44,15 @@ public static class PositionDocumentSerializer
             Positions = items
         };
 
-        return JsonSerializer.Serialize(document, SerializerOptions);
+        var json = JsonSerializer.Serialize(document, SerializerOptions);
+        if (json.Length > MaximumDocumentLength)
+        {
+            throw new ArgumentException(
+                $"Position document exceeds the {MaximumDocumentLength}-character limit.",
+                nameof(positions));
+        }
+
+        return json;
     }
 
     public static IReadOnlyList<PositionAnalysisState> Deserialize(string json)

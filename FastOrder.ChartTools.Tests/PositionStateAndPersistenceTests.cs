@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FastOrder.ChartTools.Calculations;
+using FastOrder.ChartTools.Interaction;
 using FastOrder.ChartTools.Markets;
 using FastOrder.ChartTools.Models;
 using FastOrder.ChartTools.Persistence;
@@ -72,6 +73,52 @@ public sealed class PositionStateAndPersistenceTests
     }
 
     [TestMethod]
+    public void Selection_SelectUpdateAndDeleteRemainIsolatedByIdentifier()
+    {
+        var workspace = new PositionWorkspace();
+        var selection = new PositionSelectionState();
+        var longPosition = CreateState(PositionSide.Long, 100m, 120m, 90m);
+        var shortPosition = CreateState(PositionSide.Short, 200m, 180m, 210m);
+        workspace.Add(longPosition);
+        workspace.Add(shortPosition);
+
+        selection.Select(workspace, longPosition.Id);
+        var selected = selection.GetSelectedRequired(workspace, longPosition.Id);
+        workspace.Update(selected.WithSizingInputs(selected.SizingInputs.WithAccountSize(25_000m)));
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => selection.GetSelectedRequired(workspace, shortPosition.Id));
+        Assert.AreEqual(25_000m, workspace.GetRequired(longPosition.Id).SizingInputs.AccountSize);
+        Assert.AreEqual(10_000m, workspace.GetRequired(shortPosition.Id).SizingInputs.AccountSize);
+        Assert.IsTrue(selection.RemoveSelected(workspace, longPosition.Id));
+        Assert.IsNull(selection.SelectedId);
+        Assert.AreEqual(shortPosition, workspace.GetRequired(shortPosition.Id));
+    }
+
+    [TestMethod]
+    public void Selection_ReconcilePreservesExistingSelectionOrChoosesAvailablePosition()
+    {
+        var workspace = new PositionWorkspace();
+        var selection = new PositionSelectionState();
+        var first = CreateState(PositionSide.Long, 100m, 120m, 90m);
+        var second = CreateState(PositionSide.Short, 200m, 180m, 210m);
+        workspace.Add(first);
+        workspace.Add(second);
+        selection.Select(workspace, second.Id);
+
+        selection.Reconcile(workspace);
+        Assert.AreEqual(second.Id, selection.SelectedId);
+
+        workspace.ReplaceAll([first]);
+        selection.Reconcile(workspace);
+        Assert.AreEqual(first.Id, selection.SelectedId);
+
+        workspace.ReplaceAll([]);
+        selection.Reconcile(workspace);
+        Assert.IsNull(selection.SelectedId);
+    }
+
+    [TestMethod]
     public void Persistence_RoundTripPreservesSourceFieldsAndOmitsDerivedMetrics()
     {
         var longPosition = CreateState(PositionSide.Long, 100m, 120m, 90m);
@@ -90,6 +137,34 @@ public sealed class PositionStateAndPersistenceTests
         Assert.IsFalse(json.Contains("finalQuantity", StringComparison.Ordinal));
         Assert.IsFalse(json.Contains("profitPnl", StringComparison.Ordinal));
         Assert.IsFalse(json.Contains("rewardToRiskRatio", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Persistence_RoundTripPreservesIndependentHorizontalRanges()
+    {
+        var first = CreateState(PositionSide.Long, 100m, 120m, 90m);
+        var second = CreateState(PositionSide.Short, 200m, 180m, 210m);
+        first = first.WithDrawing(first.Drawing.WithHorizontalRange(new ChartHorizontalRange(100, 220)));
+        second = second.WithDrawing(second.Drawing.WithHorizontalRange(new ChartHorizontalRange(300, 480)));
+
+        var restored = PositionDocumentSerializer.Deserialize(
+            PositionDocumentSerializer.Serialize([first, second]));
+
+        Assert.AreEqual(
+            new ChartHorizontalRange(100, 220),
+            restored.Single(item => item.Id == first.Id).Drawing.HorizontalRange);
+        Assert.AreEqual(
+            new ChartHorizontalRange(300, 480),
+            restored.Single(item => item.Id == second.Id).Drawing.HorizontalRange);
+    }
+
+    [TestMethod]
+    [DataRow("{")]
+    [DataRow("{\"version\":1,\"positions\":[],\"unknown\":true}")]
+    [DataRow("{\"version\":1,\"positions\":[],}")]
+    public void Persistence_RejectsMalformedOrNonSchemaJson(string json)
+    {
+        Assert.ThrowsExactly<JsonException>(() => PositionDocumentSerializer.Deserialize(json));
     }
 
     [TestMethod]

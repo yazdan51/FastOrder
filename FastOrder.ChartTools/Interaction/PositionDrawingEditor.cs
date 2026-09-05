@@ -71,6 +71,47 @@ public static class PositionDrawingEditor
         return drawing.WithHorizontalRange(range);
     }
 
+    public static PositionDrawing ResizeHorizontalClamped(
+        PositionDrawing drawing,
+        PositionHandle handle,
+        double horizontalValue,
+        double minimumWidth)
+    {
+        ArgumentNullException.ThrowIfNull(drawing);
+
+        if (!double.IsFinite(horizontalValue))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(horizontalValue),
+                horizontalValue,
+                "The horizontal value must be finite.");
+        }
+
+        if (!double.IsFinite(minimumWidth) || minimumWidth <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(minimumWidth),
+                minimumWidth,
+                "The minimum horizontal width must be finite and greater than zero.");
+        }
+
+        var range = handle switch
+        {
+            PositionHandle.StartEdge => new ChartHorizontalRange(
+                Math.Min(horizontalValue, drawing.HorizontalRange.End - minimumWidth),
+                drawing.HorizontalRange.End),
+            PositionHandle.EndEdge => new ChartHorizontalRange(
+                drawing.HorizontalRange.Start,
+                Math.Max(horizontalValue, drawing.HorizontalRange.Start + minimumWidth)),
+            PositionHandle.Target or PositionHandle.Entry or PositionHandle.Stop => throw new ArgumentException(
+                "A price handle cannot resize the horizontal range.",
+                nameof(handle)),
+            _ => throw new ArgumentOutOfRangeException(nameof(handle), handle, "Unknown position handle.")
+        };
+
+        return drawing.WithHorizontalRange(range);
+    }
+
     public static PositionDrawing Move(
         PositionDrawing drawing,
         decimal priceDelta,
