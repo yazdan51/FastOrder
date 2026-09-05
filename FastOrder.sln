@@ -1,0 +1,33 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastOrder", "FastOrder.csproj", "{D57C9862-32AB-4F7B-A084-92073A5EE2F0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastOrder.ChartTools", "FastOrder.ChartTools\FastOrder.ChartTools.csproj", "{3CB42136-5C36-4FCE-9D96-79D34F45AA04}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastOrder.Manager", "FastOrder.Manager\FastOrder.Manager.csproj", "{B63CC60B-3D47-41F8-8CC5-B184D07B5881}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D57C9862-32AB-4F7B-A084-92073A5EE2F0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D57C9862-32AB-4F7B-A084-92073A5EE2F0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D57C9862-32AB-4F7B-A084-92073A5EE2F0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D57C9862-32AB-4F7B-A084-92073A5EE2F0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3CB42136-5C36-4FCE-9D96-79D34F45AA04}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3CB42136-5C36-4FCE-9D96-79D34F45AA04}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3CB42136-5C36-4FCE-9D96-79D34F45AA04}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3CB42136-5C36-4FCE-9D96-79D34F45AA04}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B63CC60B-3D47-41F8-8CC5-B184D07B5881}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B63CC60B-3D47-41F8-8CC5-B184D07B5881}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B63CC60B-3D47-41F8-8CC5-B184D07B5881}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B63CC60B-3D47-41F8-8CC5-B184D07B5881}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
