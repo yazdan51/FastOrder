@@ -8,6 +8,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastOrder.ChartTools", "Fas
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastOrder.Manager", "FastOrder.Manager\FastOrder.Manager.csproj", "{B63CC60B-3D47-41F8-8CC5-B184D07B5881}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastOrder.ChartViewer", "FastOrder.ChartViewer\FastOrder.ChartViewer.csproj", "{6E3F6587-A57D-4213-8A8E-04E5E10A0E31}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FastOrder.ChartTools.Tests", "FastOrder.ChartTools.Tests\FastOrder.ChartTools.Tests.csproj", "{118C2CD9-232F-4B0B-B1D2-F633AC1A1C91}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,6 +30,14 @@ Global
 		{B63CC60B-3D47-41F8-8CC5-B184D07B5881}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B63CC60B-3D47-41F8-8CC5-B184D07B5881}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B63CC60B-3D47-41F8-8CC5-B184D07B5881}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6E3F6587-A57D-4213-8A8E-04E5E10A0E31}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E3F6587-A57D-4213-8A8E-04E5E10A0E31}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E3F6587-A57D-4213-8A8E-04E5E10A0E31}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E3F6587-A57D-4213-8A8E-04E5E10A0E31}.Release|Any CPU.Build.0 = Release|Any CPU
+		{118C2CD9-232F-4B0B-B1D2-F633AC1A1C91}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{118C2CD9-232F-4B0B-B1D2-F633AC1A1C91}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{118C2CD9-232F-4B0B-B1D2-F633AC1A1C91}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{118C2CD9-232F-4B0B-B1D2-F633AC1A1C91}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
