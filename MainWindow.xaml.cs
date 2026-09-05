@@ -25,6 +25,12 @@ namespace FastOrder
             TimeSpan.FromSeconds(
                 3);
 
+        private const string ScheduledClickTimeFormat =
+            "HH:mm:ss.fff";
+
+        private const double LayoutSplitterThickness =
+            6;
+
         private bool _webViewReady = false;
 
         private bool _monitoringEnabled = false;
@@ -72,9 +78,38 @@ namespace FastOrder
         private BrokerProfile _selectedBroker =
             BrokerProfiles.EasyTrader;
 
+        private double _controlPanelMinimumWidth;
+        private double _controlPanelMaximumWidth;
+        private double _brokerWebViewMinimumWidth;
+        private double _mainAreaMinimumHeight;
+        private double _sessionAreaMinimumHeight;
+        private double _sessionAreaMaximumHeight;
+        private double _logAreaMinimumHeight;
+        private double _logAreaMaximumHeight;
+        private double _liveNetworkLogMinimumWidth;
+        private double _importantApiMinimumWidth;
+        private double _expandedControlPanelWidth;
+        private double _expandedSessionAreaHeight;
+        private double _expandedLogAreaHeight;
+        private double _liveNetworkLogWidthShare =
+            1.65 / 2.65;
+
         public MainWindow()
         {
             InitializeComponent();
+
+            DateTime initialScheduledClickStartTime =
+                DateTime.Now.AddMinutes(
+                    1);
+
+            ScheduledClickStartTimeTextBox.Text =
+                new TimeOnly(
+                    initialScheduledClickStartTime.Hour,
+                    initialScheduledClickStartTime.Minute,
+                    0)
+                .ToString(
+                    ScheduledClickTimeFormat,
+                    CultureInfo.InvariantCulture);
 
             if (App.HasExplicitInstance)
             {
@@ -115,9 +150,40 @@ namespace FastOrder
 
             RestoreWindowLayout();
 
+            InitializeCollapsiblePanelLayout();
+
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
             StateChanged += MainWindow_StateChanged;
+        }
+
+        private void ScheduledClickSideRadioButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            DateTimeOffset currentTime =
+                DateTimeOffset.Now;
+
+            if (_exchangeClock.TryGetReading(
+                TimeSpan.MaxValue,
+                out ExchangeClockReading reading))
+            {
+                currentTime =
+                    reading.Now;
+            }
+
+            DateTimeOffset refreshedStartTime =
+                currentTime.AddMinutes(
+                    1);
+
+            ScheduledClickStartTimeTextBox.Text =
+                new TimeOnly(
+                    refreshedStartTime.Hour,
+                    refreshedStartTime.Minute,
+                    0)
+                .ToString(
+                    ScheduledClickTimeFormat,
+                    CultureInfo.InvariantCulture);
         }
 
         private void BrokerSelectionComboBox_SelectionChanged(
@@ -460,6 +526,536 @@ namespace FastOrder
             }
         }
 
+        private void InitializeCollapsiblePanelLayout()
+        {
+            _controlPanelMinimumWidth =
+                ControlPanelColumn.MinWidth;
+
+            _controlPanelMaximumWidth =
+                ControlPanelColumn.MaxWidth;
+
+            _brokerWebViewMinimumWidth =
+                BrokerWebViewColumn.MinWidth;
+
+            _mainAreaMinimumHeight =
+                MainAreaRow.MinHeight;
+
+            _sessionAreaMinimumHeight =
+                SessionAreaRow.MinHeight;
+
+            _sessionAreaMaximumHeight =
+                SessionAreaRow.MaxHeight;
+
+            _logAreaMinimumHeight =
+                LogAreaRow.MinHeight;
+
+            _logAreaMaximumHeight =
+                LogAreaRow.MaxHeight;
+
+            _liveNetworkLogMinimumWidth =
+                LiveNetworkLogColumn.MinWidth;
+
+            _importantApiMinimumWidth =
+                ImportantApiColumn.MinWidth;
+
+            _expandedControlPanelWidth =
+                NormalizeLayoutDimension(
+                    ControlPanelColumn.Width.Value,
+                    300,
+                    _controlPanelMinimumWidth,
+                    _controlPanelMaximumWidth);
+
+            _expandedSessionAreaHeight =
+                NormalizeLayoutDimension(
+                    SessionAreaRow.Height.Value,
+                    150,
+                    _sessionAreaMinimumHeight,
+                    _sessionAreaMaximumHeight);
+
+            _expandedLogAreaHeight =
+                NormalizeLayoutDimension(
+                    LogAreaRow.Height.Value,
+                    190,
+                    _logAreaMinimumHeight,
+                    _logAreaMaximumHeight);
+
+            double logWidthStarTotal =
+                LiveNetworkLogColumn.Width.Value +
+                ImportantApiColumn.Width.Value;
+
+            if (LiveNetworkLogColumn.Width.IsStar &&
+                ImportantApiColumn.Width.IsStar &&
+                logWidthStarTotal > 0)
+            {
+                _liveNetworkLogWidthShare =
+                    LiveNetworkLogColumn.Width.Value /
+                    logWidthStarTotal;
+            }
+
+            Expander[] collapsiblePanels =
+            {
+                ControlPanelExpander,
+                BrokerWebViewExpander,
+                SessionPanelExpander,
+                LiveNetworkLogExpander,
+                ImportantApiExpander
+            };
+
+            foreach (Expander panel in collapsiblePanels)
+            {
+                panel.Expanded +=
+                    CollapsiblePanel_ExpansionChanged;
+
+                panel.Collapsed +=
+                    CollapsiblePanel_ExpansionChanged;
+            }
+
+            UpdateCollapsiblePanelLayout();
+        }
+
+        private void CollapsiblePanel_ExpansionChanged(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!ReferenceEquals(
+                    e.OriginalSource,
+                    sender) ||
+                sender is not Expander panel)
+            {
+                return;
+            }
+
+            if (!panel.IsExpanded)
+            {
+                CaptureExpandedPanelDimensions(
+                    panel);
+            }
+
+            UpdateCollapsiblePanelLayout();
+        }
+
+        private void CaptureExpandedPanelDimensions(
+            Expander collapsingPanel)
+        {
+            bool mainPanelWidthCanBeCaptured =
+                ControlPanelGridSplitter.Visibility ==
+                Visibility.Visible &&
+                ControlPanelColumn.ActualWidth > 0;
+
+            if (mainPanelWidthCanBeCaptured &&
+                (ReferenceEquals(
+                    collapsingPanel,
+                    ControlPanelExpander) ||
+                 ReferenceEquals(
+                    collapsingPanel,
+                    BrokerWebViewExpander)))
+            {
+                _expandedControlPanelWidth =
+                    NormalizeLayoutDimension(
+                        ControlPanelColumn.ActualWidth,
+                        _expandedControlPanelWidth,
+                        _controlPanelMinimumWidth,
+                        _controlPanelMaximumWidth);
+            }
+
+            if (ReferenceEquals(
+                    collapsingPanel,
+                    SessionPanelExpander) &&
+                SessionAreaRow.Height.IsAbsolute &&
+                SessionAreaRow.ActualHeight > 0)
+            {
+                _expandedSessionAreaHeight =
+                    NormalizeLayoutDimension(
+                        SessionAreaRow.ActualHeight,
+                        _expandedSessionAreaHeight,
+                        _sessionAreaMinimumHeight,
+                        _sessionAreaMaximumHeight);
+            }
+
+            bool isLogPanel =
+                ReferenceEquals(
+                    collapsingPanel,
+                    LiveNetworkLogExpander) ||
+                ReferenceEquals(
+                    collapsingPanel,
+                    ImportantApiExpander);
+
+            if (!isLogPanel)
+            {
+                return;
+            }
+
+            if (LogAreaRow.Height.IsAbsolute &&
+                LogAreaRow.ActualHeight > 0)
+            {
+                _expandedLogAreaHeight =
+                    NormalizeLayoutDimension(
+                        LogAreaRow.ActualHeight,
+                        _expandedLogAreaHeight,
+                        _logAreaMinimumHeight,
+                        _logAreaMaximumHeight);
+            }
+
+            if (LogPanelGridSplitter.Visibility !=
+                Visibility.Visible)
+            {
+                return;
+            }
+
+            double combinedLogWidth =
+                LiveNetworkLogColumn.ActualWidth +
+                ImportantApiColumn.ActualWidth;
+
+            if (combinedLogWidth > 0)
+            {
+                _liveNetworkLogWidthShare =
+                    Math.Clamp(
+                        LiveNetworkLogColumn.ActualWidth /
+                        combinedLogWidth,
+                        0.2,
+                        0.8);
+            }
+        }
+
+        private void UpdateCollapsiblePanelLayout()
+        {
+            UpdateMainPanelColumns();
+            UpdateLogPanelColumns();
+            UpdateMainPanelRows();
+        }
+
+        private void UpdateMainPanelColumns()
+        {
+            bool controlPanelExpanded =
+                ControlPanelExpander.IsExpanded;
+
+            bool brokerWebViewExpanded =
+                BrokerWebViewExpander.IsExpanded;
+
+            ControlPanelColumn.MinWidth =
+                controlPanelExpanded
+                    ? _controlPanelMinimumWidth
+                    : 0;
+
+            BrokerWebViewColumn.MinWidth =
+                brokerWebViewExpanded
+                    ? _brokerWebViewMinimumWidth
+                    : 0;
+
+            if (controlPanelExpanded &&
+                brokerWebViewExpanded)
+            {
+                ControlPanelColumn.MaxWidth =
+                    _controlPanelMaximumWidth;
+
+                ControlPanelColumn.Width =
+                    new GridLength(
+                        _expandedControlPanelWidth);
+
+                BrokerWebViewColumn.Width =
+                    new GridLength(
+                        1,
+                        GridUnitType.Star);
+
+                SetColumnSplitterVisibility(
+                    MainAreaSplitterColumn,
+                    ControlPanelGridSplitter,
+                    true);
+
+                return;
+            }
+
+            SetColumnSplitterVisibility(
+                MainAreaSplitterColumn,
+                ControlPanelGridSplitter,
+                false);
+
+            if (controlPanelExpanded)
+            {
+                ControlPanelColumn.MaxWidth =
+                    double.PositiveInfinity;
+
+                ControlPanelColumn.Width =
+                    new GridLength(
+                        1,
+                        GridUnitType.Star);
+
+                BrokerWebViewColumn.Width =
+                    GridLength.Auto;
+
+                return;
+            }
+
+            ControlPanelColumn.MaxWidth =
+                double.PositiveInfinity;
+
+            ControlPanelColumn.Width =
+                GridLength.Auto;
+
+            BrokerWebViewColumn.Width =
+                brokerWebViewExpanded
+                    ? new GridLength(
+                        1,
+                        GridUnitType.Star)
+                    : GridLength.Auto;
+        }
+
+        private void UpdateLogPanelColumns()
+        {
+            bool liveNetworkLogExpanded =
+                LiveNetworkLogExpander.IsExpanded;
+
+            bool importantApiExpanded =
+                ImportantApiExpander.IsExpanded;
+
+            LiveNetworkLogColumn.MinWidth =
+                liveNetworkLogExpanded
+                    ? _liveNetworkLogMinimumWidth
+                    : 0;
+
+            ImportantApiColumn.MinWidth =
+                importantApiExpanded
+                    ? _importantApiMinimumWidth
+                    : 0;
+
+            if (liveNetworkLogExpanded &&
+                importantApiExpanded)
+            {
+                LiveNetworkLogColumn.Width =
+                    new GridLength(
+                        _liveNetworkLogWidthShare,
+                        GridUnitType.Star);
+
+                ImportantApiColumn.Width =
+                    new GridLength(
+                        1 - _liveNetworkLogWidthShare,
+                        GridUnitType.Star);
+
+                SetColumnSplitterVisibility(
+                    LogPanelSplitterColumn,
+                    LogPanelGridSplitter,
+                    true);
+
+                return;
+            }
+
+            SetColumnSplitterVisibility(
+                LogPanelSplitterColumn,
+                LogPanelGridSplitter,
+                false);
+
+            LiveNetworkLogColumn.Width =
+                liveNetworkLogExpanded
+                    ? new GridLength(
+                        1,
+                        GridUnitType.Star)
+                    : GridLength.Auto;
+
+            ImportantApiColumn.Width =
+                importantApiExpanded
+                    ? new GridLength(
+                        1,
+                        GridUnitType.Star)
+                    : GridLength.Auto;
+        }
+
+        private void UpdateMainPanelRows()
+        {
+            bool mainAreaExpanded =
+                ControlPanelExpander.IsExpanded ||
+                BrokerWebViewExpander.IsExpanded;
+
+            bool sessionAreaExpanded =
+                SessionPanelExpander.IsExpanded;
+
+            bool logAreaExpanded =
+                LiveNetworkLogExpander.IsExpanded ||
+                ImportantApiExpander.IsExpanded;
+
+            if (mainAreaExpanded)
+            {
+                SetExpandedRow(
+                    MainAreaRow,
+                    _mainAreaMinimumHeight,
+                    double.PositiveInfinity,
+                    _mainAreaMinimumHeight,
+                    true);
+
+                SetPanelRow(
+                    SessionAreaRow,
+                    sessionAreaExpanded,
+                    _sessionAreaMinimumHeight,
+                    _sessionAreaMaximumHeight,
+                    _expandedSessionAreaHeight,
+                    false);
+
+                SetPanelRow(
+                    LogAreaRow,
+                    logAreaExpanded,
+                    _logAreaMinimumHeight,
+                    _logAreaMaximumHeight,
+                    _expandedLogAreaHeight,
+                    false);
+            }
+            else if (sessionAreaExpanded)
+            {
+                SetCollapsedRow(
+                    MainAreaRow);
+
+                SetExpandedRow(
+                    SessionAreaRow,
+                    _sessionAreaMinimumHeight,
+                    _sessionAreaMaximumHeight,
+                    _expandedSessionAreaHeight,
+                    true);
+
+                SetPanelRow(
+                    LogAreaRow,
+                    logAreaExpanded,
+                    _logAreaMinimumHeight,
+                    _logAreaMaximumHeight,
+                    _expandedLogAreaHeight,
+                    false);
+            }
+            else if (logAreaExpanded)
+            {
+                SetCollapsedRow(
+                    MainAreaRow);
+
+                SetCollapsedRow(
+                    SessionAreaRow);
+
+                SetExpandedRow(
+                    LogAreaRow,
+                    _logAreaMinimumHeight,
+                    _logAreaMaximumHeight,
+                    _expandedLogAreaHeight,
+                    true);
+            }
+            else
+            {
+                SetCollapsedRow(
+                    MainAreaRow);
+
+                SetCollapsedRow(
+                    SessionAreaRow);
+
+                SetCollapsedRow(
+                    LogAreaRow);
+            }
+
+            SetRowSplitterVisibility(
+                MainSessionSplitterRow,
+                MainSessionGridSplitter,
+                mainAreaExpanded &&
+                sessionAreaExpanded);
+
+            SetRowSplitterVisibility(
+                SessionLogSplitterRow,
+                SessionLogGridSplitter,
+                sessionAreaExpanded &&
+                logAreaExpanded);
+        }
+
+        private static void SetPanelRow(
+            RowDefinition row,
+            bool isExpanded,
+            double minimumHeight,
+            double maximumHeight,
+            double preferredHeight,
+            bool fillsAvailableSpace)
+        {
+            if (isExpanded)
+            {
+                SetExpandedRow(
+                    row,
+                    minimumHeight,
+                    maximumHeight,
+                    preferredHeight,
+                    fillsAvailableSpace);
+            }
+            else
+            {
+                SetCollapsedRow(
+                    row);
+            }
+        }
+
+        private static void SetExpandedRow(
+            RowDefinition row,
+            double minimumHeight,
+            double maximumHeight,
+            double preferredHeight,
+            bool fillsAvailableSpace)
+        {
+            row.MinHeight =
+                minimumHeight;
+
+            row.MaxHeight =
+                fillsAvailableSpace
+                    ? double.PositiveInfinity
+                    : maximumHeight;
+
+            row.Height =
+                fillsAvailableSpace
+                    ? new GridLength(
+                        1,
+                        GridUnitType.Star)
+                    : new GridLength(
+                        NormalizeLayoutDimension(
+                            preferredHeight,
+                            minimumHeight,
+                            minimumHeight,
+                            maximumHeight));
+        }
+
+        private static void SetCollapsedRow(
+            RowDefinition row)
+        {
+            row.MinHeight =
+                0;
+
+            row.MaxHeight =
+                double.PositiveInfinity;
+
+            row.Height =
+                GridLength.Auto;
+        }
+
+        private static void SetColumnSplitterVisibility(
+            ColumnDefinition splitterColumn,
+            GridSplitter splitter,
+            bool isVisible)
+        {
+            splitterColumn.Width =
+                new GridLength(
+                    isVisible
+                        ? LayoutSplitterThickness
+                        : 0);
+
+            splitter.Visibility =
+                isVisible
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+        }
+
+        private static void SetRowSplitterVisibility(
+            RowDefinition splitterRow,
+            GridSplitter splitter,
+            bool isVisible)
+        {
+            splitterRow.Height =
+                new GridLength(
+                    isVisible
+                        ? LayoutSplitterThickness
+                        : 0);
+
+            splitter.Visibility =
+                isVisible
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+        }
+
         private static double NormalizeLayoutDimension(
             double value,
             double fallback,
@@ -541,19 +1137,32 @@ namespace FastOrder
                 settings.MainWindowState =
                     (int)_lastNonMinimizedWindowState;
 
+                double controlPanelWidthToSave =
+                    ControlPanelExpander.IsExpanded &&
+                    BrokerWebViewExpander.IsExpanded
+                        ? ControlPanelColumn.ActualWidth
+                        : _expandedControlPanelWidth;
+
                 settings.ControlPanelWidth =
                     NormalizeLayoutDimension(
-                        ControlPanelColumn.ActualWidth,
-                        ControlPanelColumn.Width.Value,
-                        ControlPanelColumn.MinWidth,
-                        ControlPanelColumn.MaxWidth);
+                        controlPanelWidthToSave,
+                        _expandedControlPanelWidth,
+                        _controlPanelMinimumWidth,
+                        _controlPanelMaximumWidth);
+
+                double logAreaHeightToSave =
+                    LogAreaRow.Height.IsAbsolute &&
+                    (LiveNetworkLogExpander.IsExpanded ||
+                     ImportantApiExpander.IsExpanded)
+                        ? LogAreaRow.ActualHeight
+                        : _expandedLogAreaHeight;
 
                 settings.LogAreaHeight =
                     NormalizeLayoutDimension(
-                        LogAreaRow.ActualHeight,
-                        LogAreaRow.Height.Value,
-                        LogAreaRow.MinHeight,
-                        LogAreaRow.MaxHeight);
+                        logAreaHeightToSave,
+                        _expandedLogAreaHeight,
+                        _logAreaMinimumHeight,
+                        _logAreaMaximumHeight);
 
                 settings.SelectedBrokerId =
                     _selectedBroker.Id;
@@ -646,7 +1255,7 @@ namespace FastOrder
                 out ExchangeClockReading reading))
             {
                 ExchangeClockTextBlock.Text =
-                    "TSETMC | UNAVAILABLE";
+                    string.Empty;
 
                 ExchangeClockTextBlock.Foreground =
                     Brushes.DarkRed;
@@ -661,12 +1270,7 @@ namespace FastOrder
             ExchangeClockTextBlock.Text =
                 reading.Now.ToString(
                     "HH:mm:ss.fff",
-                    CultureInfo.InvariantCulture) +
-                " | " +
-                ExchangeClock.SourceDisplayName +
-                (isFresh
-                    ? " | SYNC"
-                    : " | STALE");
+                    CultureInfo.InvariantCulture);
 
             ExchangeClockTextBlock.Foreground =
                 isFresh
@@ -1307,13 +1911,13 @@ namespace FastOrder
 
             if (!TimeOnly.TryParseExact(
                 ScheduledClickStartTimeTextBox.Text?.Trim(),
-                "HH:mm:ss",
+                ScheduledClickTimeFormat,
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.None,
                 out TimeOnly requestedStartTime))
             {
                 SetStatus(
-                    "زمان شروع را دقیقاً با قالب HH:mm:ss وارد کنید.");
+                    "زمان شروع را دقیقاً با قالب HH:mm:ss.fff وارد کنید.");
                 ScheduledClickStartTimeTextBox.Focus();
                 return;
             }
@@ -1397,11 +2001,11 @@ namespace FastOrder
                         CultureInfo.InvariantCulture) +
                     Environment.NewLine +
                     "زمان شروع: " + startTime.ToString(
-                        "HH:mm:ss",
+                        ScheduledClickTimeFormat,
                         CultureInfo.InvariantCulture) +
                     Environment.NewLine +
                     "آخرین اسلات: " + lastTarget.ToString(
-                        "HH:mm:ss",
+                        ScheduledClickTimeFormat,
                         CultureInfo.InvariantCulture) +
                     Environment.NewLine +
                     "نرخ اجرا: یک کلیک رسمی " + sideDisplay +

@@ -54,6 +54,34 @@
                     Value="6"/>
         </Style>
 
+        <Style x:Key="PanelExpanderStyle"
+               TargetType="Expander">
+            <Setter Property="IsExpanded"
+                    Value="True"/>
+            <Setter Property="HorizontalContentAlignment"
+                    Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment"
+                    Value="Stretch"/>
+        </Style>
+
+        <Style x:Key="SectionExpanderStyle"
+               TargetType="Expander"
+               BasedOn="{StaticResource PanelExpanderStyle}">
+            <Setter Property="Margin"
+                    Value="0,0,0,6"/>
+            <Setter Property="HeaderTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}"
+                                   Margin="0,2,0,6"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FF263238"/>
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="GroupBox">
             <Setter Property="Background"
                     Value="White"/>
@@ -83,81 +111,33 @@
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"
+            <RowDefinition x:Name="MainAreaRow"
+                           Height="*"
                            MinHeight="220"/>
-            <RowDefinition Height="6"/>
+            <RowDefinition x:Name="MainSessionSplitterRow"
+                           Height="6"/>
             <RowDefinition x:Name="SessionAreaRow"
                            Height="150"
                            MinHeight="120"
                            MaxHeight="300"/>
-            <RowDefinition Height="6"/>
+            <RowDefinition x:Name="SessionLogSplitterRow"
+                           Height="6"/>
             <RowDefinition x:Name="LogAreaRow"
                            Height="190"
                            MinHeight="120"
                            MaxHeight="380"/>
         </Grid.RowDefinitions>
 
-        <!-- HEADER -->
+        <!-- Non-visual targets retained for existing status and broker-route logic. -->
 
-        <Border Grid.Row="0"
-                Margin="0,0,0,10"
-                Padding="14,10"
-                Style="{StaticResource PanelBorderStyle}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-
-                <StackPanel Grid.Column="0"
-                            Margin="0,0,24,0">
-                    <TextBlock Text="FastOrder"
-                               FontSize="21"
-                               FontWeight="SemiBold"
-                               Foreground="#FF17212B"/>
-                    <TextBlock x:Name="BrokerRouteTextBlock"
-                               Text="مسیر رسمی کارگزاری انتخاب‌شده"
-                               Margin="0,2,0,0"
-                               FlowDirection="RightToLeft"
-                               Foreground="#FF607D8B"
-                               FontSize="12"/>
-                </StackPanel>
-
-                <TextBlock x:Name="StatusTextBlock"
-                           Grid.Column="1"
-                           Text="در حال آماده‌سازی..."
-                           FlowDirection="RightToLeft"
-                           HorizontalAlignment="Stretch"
-                           VerticalAlignment="Center"
-                           TextAlignment="Right"
-                           TextWrapping="Wrap"
-                           FontSize="15"
-                           Foreground="#FF263238"/>
-
-                <StackPanel Grid.Column="2"
-                            Margin="22,0,0,0"
-                            VerticalAlignment="Center"
-                            FlowDirection="RightToLeft">
-                    <TextBlock Text="زمان مرکز معاملات"
-                               HorizontalAlignment="Right"
-                               FontSize="11"
-                               Foreground="#FF607D8B"/>
-                    <TextBlock x:Name="ExchangeClockTextBlock"
-                               Text="در حال همگام‌سازی..."
-                               Margin="0,2,0,0"
-                               MinWidth="205"
-                               HorizontalAlignment="Right"
-                               TextAlignment="Right"
-                               FlowDirection="LeftToRight"
-                               FontFamily="Consolas"
-                               FontSize="13"
-                               FontWeight="SemiBold"
-                               Foreground="#FFEF6C00"
-                               AutomationProperties.Name="زمان مرکز معاملات"/>
-                </StackPanel>
-            </Grid>
-        </Border>
+        <Grid Grid.Row="0"
+              Visibility="Collapsed"
+              IsHitTestVisible="False">
+            <TextBlock x:Name="BrokerRouteTextBlock"
+                       Text="مسیر رسمی کارگزاری انتخاب‌شده"/>
+            <TextBlock x:Name="StatusTextBlock"
+                       Text="در حال آماده‌سازی..."/>
+        </Grid>
 
         <!-- RESPONSIVE CONTROL PANEL + WEBVIEW -->
 
@@ -167,20 +147,37 @@
                                   Width="300"
                                   MinWidth="260"
                                   MaxWidth="440"/>
-                <ColumnDefinition Width="6"/>
-                <ColumnDefinition Width="*"
+                <ColumnDefinition x:Name="MainAreaSplitterColumn"
+                                  Width="6"/>
+                <ColumnDefinition x:Name="BrokerWebViewColumn"
+                                  Width="*"
                                   MinWidth="460"/>
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"
-                    Padding="12"
+                    Padding="12,8"
                     Style="{StaticResource PanelBorderStyle}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled"
-                              CanContentScroll="True">
-                    <StackPanel FlowDirection="RightToLeft">
-                        <TextBlock Text="اتصال و نشست"
-                                   Style="{StaticResource SectionTitleStyle}"/>
+                <Expander x:Name="ControlPanelExpander"
+                          Style="{StaticResource PanelExpanderStyle}"
+                          IsExpanded="True"
+                          AutomationProperties.Name="پنل کنترل">
+                    <Expander.Header>
+                        <TextBlock Text="پنل کنترل"
+                                   Margin="6,2,0,6"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FF263238"
+                                   FlowDirection="RightToLeft"/>
+                    </Expander.Header>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  CanContentScroll="True">
+                        <StackPanel FlowDirection="RightToLeft">
+                            <Expander Header="اتصال و نشست"
+                                      Style="{StaticResource SectionExpanderStyle}"
+                                      AutomationProperties.Name="اتصال و نشست">
+                                <StackPanel>
 
                         <TextBlock Text="کارگزاری:"
                                    Margin="0,0,0,5"
@@ -219,10 +216,13 @@
                                 Style="{StaticResource ControlButtonStyle}"
                                 Click="ReloadButton_Click"/>
 
-                        <Separator Margin="0,7,0,10"/>
+                                </StackPanel>
+                            </Expander>
 
-                        <TextBlock Text="ارسال زمان‌بندی‌شده"
-                                   Style="{StaticResource SectionTitleStyle}"/>
+                            <Expander Header="ارسال زمان‌بندی‌شده"
+                                      Style="{StaticResource SectionExpanderStyle}"
+                                      AutomationProperties.Name="ارسال زمان‌بندی‌شده">
+                                <StackPanel>
 
                         <TextBlock Text="سمت سفارش:"
                                    Margin="0,0,0,5"
@@ -236,11 +236,13 @@
                                          Content="خرید"
                                          GroupName="ScheduledClickSide"
                                          Margin="0,0,18,0"
-                                         AutomationProperties.Name="سمت خرید"/>
+                                         AutomationProperties.Name="سمت خرید"
+                                         Click="ScheduledClickSideRadioButton_Click"/>
                             <RadioButton x:Name="ScheduledClickSellRadioButton"
                                          Content="فروش"
                                          GroupName="ScheduledClickSide"
-                                         AutomationProperties.Name="سمت فروش"/>
+                                         AutomationProperties.Name="سمت فروش"
+                                         Click="ScheduledClickSideRadioButton_Click"/>
                         </StackPanel>
 
                         <TextBlock Text="تعداد سفارش:"
@@ -257,7 +259,21 @@
                                  AutomationProperties.Name="تعداد سفارش"
                                  ToolTip="تعداد کلیک‌های رسمی سمت انتخاب‌شده؛ این مقدار تعداد سهم نیست."/>
 
-                        <TextBlock Text="زمان شروع (HH:mm:ss):"
+                        <StackPanel Margin="0,0,0,8">
+                            <TextBlock x:Name="ExchangeClockTextBlock"
+                                       Text=""
+                                       MinWidth="205"
+                                       HorizontalAlignment="Stretch"
+                                       TextAlignment="Right"
+                                       FlowDirection="LeftToRight"
+                                       FontFamily="Consolas"
+                                       FontSize="16"
+                                       FontWeight="ExtraBold"
+                                       Foreground="#FFEF6C00"
+                                       AutomationProperties.Name="زمان جاری مرکز معاملات"/>
+                        </StackPanel>
+
+                        <TextBlock Text="زمان شروع (HH:mm:ss.fff):"
                                    Margin="0,0,0,5"
                                    Foreground="#FF455A64"
                                    FontWeight="SemiBold"/>
@@ -269,7 +285,7 @@
                                  FlowDirection="LeftToRight"
                                  TextAlignment="Right"
                                  AutomationProperties.Name="زمان شروع"
-                                 ToolTip="زمان مرکز معاملات با قالب HH:mm:ss"/>
+                                 ToolTip="زمان مرکز معاملات با قالب HH:mm:ss.fff"/>
 
                         <Button x:Name="StartScheduledClickButton"
                                 Content="شروع ارسال زمان‌بندی‌شده"
@@ -291,10 +307,12 @@
                                 ToolTip="تلاش‌های بعدی را لغو می‌کند؛ عملیات ارسال‌شده قابل بازگردانی نیست."
                                 Click="CancelScheduledOrderButton_Click"/>
 
-                        <Separator Margin="0,5,0,10"/>
+                                </StackPanel>
+                            </Expander>
 
-                        <TextBlock Text="ابزارهای بررسی"
-                                   Style="{StaticResource SectionTitleStyle}"/>
+                            <Expander Header="ابزارهای بررسی"
+                                      Style="{StaticResource SectionExpanderStyle}"
+                                      AutomationProperties.Name="ابزارهای بررسی">
 
                         <Button x:Name="WebViewTimingTestButton"
                                 Content="تست زمان‌بندی WebView2"
@@ -303,10 +321,12 @@
                                 ToolTip="فقط زمان اجرای JavaScript را اندازه‌گیری می‌کند؛ هیچ کلیک، POST یا تغییر فرم انجام نمی‌شود."
                                 Click="WebViewTimingTestButton_Click"/>
 
-                        <Separator Margin="0,5,0,10"/>
+                            </Expander>
 
-                        <TextBlock Text="نمایش گزارش"
-                                   Style="{StaticResource SectionTitleStyle}"/>
+                            <Expander Header="نمایش گزارش"
+                                      Style="{StaticResource SectionExpanderStyle}"
+                                      AutomationProperties.Name="نمایش گزارش">
+                                <StackPanel>
 
                         <Button x:Name="PauseButton"
                                 Content="Pause Log"
@@ -317,11 +337,15 @@
                                 Content="Clear Log"
                                 Style="{StaticResource ControlButtonStyle}"
                                 Click="ClearButton_Click"/>
-                    </StackPanel>
-                </ScrollViewer>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Expander>
             </Border>
 
-            <GridSplitter Grid.Column="1"
+            <GridSplitter x:Name="ControlPanelGridSplitter"
+                          Grid.Column="1"
                           Width="6"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
@@ -334,33 +358,29 @@
             <Border Grid.Column="2"
                     Style="{StaticResource PanelBorderStyle}"
                     ClipToBounds="True">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0"
-                            Padding="12,8"
-                            Background="#FFF8FAFB"
-                            BorderBrush="#FFD7DDE3"
-                            BorderThickness="0,0,0,1">
+                <Expander x:Name="BrokerWebViewExpander"
+                          Style="{StaticResource PanelExpanderStyle}"
+                          IsExpanded="True"
+                          AutomationProperties.Name="نمای کارگزاری">
+                    <Expander.Header>
                         <TextBlock x:Name="BrokerWebViewTitleTextBlock"
                                    Text="کارگزاری انتخاب‌شده"
+                                   Margin="8,6,0,6"
                                    FontSize="14"
                                    FontWeight="SemiBold"
-                                   Foreground="#FF263238"/>
-                    </Border>
+                                   Foreground="#FF263238"
+                                   FlowDirection="RightToLeft"/>
+                    </Expander.Header>
 
-                    <wv2:WebView2 x:Name="Browser"
-                                  Grid.Row="1"
+                    <Grid>
+
+                        <wv2:WebView2 x:Name="Browser"
                                   HorizontalAlignment="Stretch"
                                   VerticalAlignment="Stretch"
                                   NavigationStarting="Browser_NavigationStarting"
                                   NavigationCompleted="Browser_NavigationCompleted"/>
 
-                    <Border x:Name="OfficialUiDispatcherOverlay"
-                            Grid.Row="1"
+                        <Border x:Name="OfficialUiDispatcherOverlay"
                             Panel.ZIndex="10"
                             Background="#990B1720"
                             Visibility="Collapsed"
@@ -384,12 +404,14 @@
                                            Foreground="#FF263238"/>
                             </StackPanel>
                         </Border>
-                    </Border>
-                </Grid>
+                        </Border>
+                    </Grid>
+                </Expander>
             </Border>
         </Grid>
 
-        <GridSplitter Grid.Row="2"
+        <GridSplitter x:Name="MainSessionGridSplitter"
+                      Grid.Row="2"
                       Height="6"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
@@ -405,35 +427,35 @@
                 Margin="0,4,0,0"
                 Style="{StaticResource PanelBorderStyle}"
                 ClipToBounds="True">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
+            <Expander x:Name="SessionPanelExpander"
+                      Style="{StaticResource PanelExpanderStyle}"
+                      IsExpanded="False"
+                      AutomationProperties.Name="نشست‌های کلیک زمان‌بندی‌شده">
+                <Expander.Header>
+                    <Grid Margin="8,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
 
-                <Grid Grid.Row="0"
-                      Margin="12,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="نشست‌های کلیک زمان‌بندی‌شده"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FF263238"
+                                   FlowDirection="RightToLeft"/>
 
-                    <TextBlock Grid.Column="0"
-                               Text="نشست‌های کلیک زمان‌بندی‌شده"
-                               FontSize="14"
-                               FontWeight="SemiBold"
-                               Foreground="#FF263238"/>
-
-                    <TextBlock Grid.Column="1"
-                               Text="یک کلیک رسمی سمت انتخاب‌شده در هر اسلات یک‌ثانیه‌ای"
-                               HorizontalAlignment="Right"
-                               FlowDirection="RightToLeft"
-                               Foreground="#FF607D8B"
-                               FontSize="12"/>
-                </Grid>
+                        <TextBlock Grid.Column="1"
+                                   Text="یک کلیک رسمی سمت انتخاب‌شده در هر اسلات یک‌ثانیه‌ای"
+                                   Margin="18,0,0,0"
+                                   HorizontalAlignment="Right"
+                                   FlowDirection="RightToLeft"
+                                   Foreground="#FF607D8B"
+                                   FontSize="12"/>
+                    </Grid>
+                </Expander.Header>
 
                 <DataGrid x:Name="SessionDataGrid"
-                          Grid.Row="1"
                           AutoGenerateColumns="False"
                           IsReadOnly="True"
                           CanUserAddRows="False"
@@ -512,10 +534,11 @@
                         </DataGridTemplateColumn>
                     </DataGrid.Columns>
                 </DataGrid>
-            </Grid>
+            </Expander>
         </Border>
 
-        <GridSplitter Grid.Row="4"
+        <GridSplitter x:Name="SessionLogGridSplitter"
+                      Grid.Row="4"
                       Height="6"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
@@ -530,49 +553,25 @@
         <Grid Grid.Row="5"
               Margin="0,4,0,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.65*"
+                <ColumnDefinition x:Name="LiveNetworkLogColumn"
+                                  Width="1.65*"
                                   MinWidth="320"/>
-                <ColumnDefinition Width="6"/>
-                <ColumnDefinition Width="*"
+                <ColumnDefinition x:Name="LogPanelSplitterColumn"
+                                  Width="6"/>
+                <ColumnDefinition x:Name="ImportantApiColumn"
+                                  Width="*"
                                   MinWidth="260"/>
             </Grid.ColumnDefinitions>
 
-            <GroupBox Grid.Column="0"
-                      Header="Live Network Log"
-                      Margin="0">
-                <TextBox x:Name="LogTextBox"
-                         IsReadOnly="True"
-                         AcceptsReturn="True"
-                         TextWrapping="NoWrap"
-                         VerticalScrollBarVisibility="Auto"
-                         HorizontalScrollBarVisibility="Auto"
-                         FontFamily="Consolas"
-                         FontSize="12"
-                         Padding="5"
-                         FlowDirection="LeftToRight"/>
-            </GroupBox>
-
-            <GridSplitter Grid.Column="1"
-                          Width="6"
-                          HorizontalAlignment="Stretch"
-                          VerticalAlignment="Stretch"
-                          ResizeDirection="Columns"
-                          ResizeBehavior="PreviousAndNext"
-                          ShowsPreview="True"
-                          Background="Transparent"
-                          ToolTip="برای تغییر عرض گزارش‌ها بکشید"/>
-
-            <GroupBox Grid.Column="2"
-                      Header="Important API"
-                      Margin="0">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-
-                    <TextBox x:Name="ImportantApiTextBox"
-                             Grid.Row="0"
+            <Border Grid.Column="0"
+                    Style="{StaticResource PanelBorderStyle}"
+                    ClipToBounds="True">
+                <Expander x:Name="LiveNetworkLogExpander"
+                          Header="Live Network Log"
+                          Style="{StaticResource PanelExpanderStyle}"
+                          IsExpanded="False"
+                          AutomationProperties.Name="Live Network Log">
+                    <TextBox x:Name="LogTextBox"
                              IsReadOnly="True"
                              AcceptsReturn="True"
                              TextWrapping="NoWrap"
@@ -582,17 +581,57 @@
                              FontSize="12"
                              Padding="5"
                              FlowDirection="LeftToRight"/>
+                </Expander>
+            </Border>
 
-                    <Button x:Name="ClearImportantButton"
-                            Grid.Row="1"
-                            Content="پاک کردن Important API"
-                            MinHeight="32"
-                            Margin="0,6,0,0"
-                            Padding="10,4"
-                            FlowDirection="RightToLeft"
-                            Click="ClearImportantButton_Click"/>
-                </Grid>
-            </GroupBox>
+            <GridSplitter x:Name="LogPanelGridSplitter"
+                          Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"
+                          ShowsPreview="True"
+                          Background="Transparent"
+                          ToolTip="برای تغییر عرض گزارش‌ها بکشید"/>
+
+            <Border Grid.Column="2"
+                    Style="{StaticResource PanelBorderStyle}"
+                    ClipToBounds="True">
+                <Expander x:Name="ImportantApiExpander"
+                          Header="Important API"
+                          Style="{StaticResource PanelExpanderStyle}"
+                          IsExpanded="False"
+                          AutomationProperties.Name="Important API">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBox x:Name="ImportantApiTextBox"
+                                 Grid.Row="0"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="NoWrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas"
+                                 FontSize="12"
+                                 Padding="5"
+                                 FlowDirection="LeftToRight"/>
+
+                        <Button x:Name="ClearImportantButton"
+                                Grid.Row="1"
+                                Content="پاک کردن Important API"
+                                MinHeight="32"
+                                Margin="0,6,0,0"
+                                Padding="10,4"
+                                FlowDirection="RightToLeft"
+                                Click="ClearImportantButton_Click"/>
+                    </Grid>
+                </Expander>
+            </Border>
         </Grid>
     </Grid>
 </Window>

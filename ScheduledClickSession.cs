@@ -112,7 +112,7 @@ namespace FastOrder
         public DateTimeOffset StartTime { get; }
 
         public string StartTimeDisplay =>
-            StartTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            StartTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
 
         public OrderSessionState State
         {
@@ -159,7 +159,7 @@ namespace FastOrder
         }
 
         public string NextDueDisplay =>
-            NextDueAt?.ToString("HH:mm:ss", CultureInfo.InvariantCulture) ?? "—";
+            NextDueAt?.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) ?? "—";
 
         public string LastStatus
         {
